@@ -82,7 +82,7 @@ def append_jobs(jobs: list[Job]) -> None:
             job.salary or "",            # E: Salary
             "",                          # F: Date Submitted (empty on scrape)
             job.link or "",              # G: Link to Job Req
-            "",                          # H: Rejection Reason
+            "N/A",                       # H: Rejection Reason
             "",                          # I: Notes
         ]
         for job in jobs
