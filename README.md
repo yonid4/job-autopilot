@@ -11,7 +11,7 @@ Automatically scrapes job postings, filters them against your resume using Gemin
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.10+ (3.11 recommended; if using pyenv: `pyenv local 3.11.14`)
 - A [Google Cloud Service Account](https://console.cloud.google.com/) with the Sheets API enabled
 - A [Gemini API key](https://aistudio.google.com/app/apikey)
 - A Google Sheet set up with the column layout described below
@@ -23,7 +23,7 @@ Automatically scrapes job postings, filters them against your resume using Gemin
 ```bash
 git clone https://github.com/yonid4/job-autopilot.git
 cd job-autopilot
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -92,7 +92,7 @@ STATUS_ON_SCRAPE = "Have Not Applied"
 
 ```bash
 source .venv/bin/activate
-python main.py
+python3 main.py
 ```
 
 Output will show scraped jobs, any errors, and a summary of how many were added vs. skipped as duplicates.

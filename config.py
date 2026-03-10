@@ -16,7 +16,7 @@ class Config:
 
     # --- Sites ---
     # Options: "linkedin", "indeed", "glassdoor", "zip_recruiter", "google"
-    SITE_NAMES = ["linkedin", "indeed", "glassdoor", "zip_recruiter"]
+    SITE_NAMES = ["linkedin", "indeed"]
 
     # --- Filters ---
     IS_REMOTE = False
@@ -35,4 +35,5 @@ class Config:
     SHEET_TAB_NAME = "Tracking Template"
     STATUS_ON_SCRAPE = "Have Not Applied"
 
+    # --- GEMINI ---
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
