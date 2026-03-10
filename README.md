@@ -70,7 +70,13 @@ To re-parse your resume (e.g., after updating it), delete `resume.json`.
 
 ## Configuration
 
-Edit `config.py` to customize your search:
+Copy the example config and edit it:
+
+```bash
+cp config.example.py config.py
+```
+
+Edit `config.py` to customize your search (`config.py` is gitignored — each user keeps their own):
 
 ```python
 SEARCH_TERM = "software engineer"
