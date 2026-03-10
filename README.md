@@ -21,7 +21,7 @@ Automatically scrapes job postings, filters them against your resume using Gemin
 ### 1. Clone and install dependencies
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/yonid4/job-autopilot.git
 cd job-autopilot
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
