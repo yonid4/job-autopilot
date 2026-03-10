@@ -2,7 +2,7 @@
 import os
 
 # Local
-import scraper
+import jobspy_service
 import sheets
 from config import Config as config
 from qualifiar import filtered_jobs
@@ -22,13 +22,13 @@ def main() -> None:
 
     print(f"Scraping: {config.SEARCH_TERM} in {config.LOCATION} across {config.SITE_NAMES}\n")
 
-    jobs, errors = scraper.run_scrape()
+    jobs, errors = jobspy_service.run_scrape()
 
     for err in errors:
         print(f"[error] {err}")
 
     if not jobs:
-        print("No jobs returned from scraper.")
+        print("No jobs returned from jobspy service.")
         return
 
     existing_links = sheets.get_existing_links()

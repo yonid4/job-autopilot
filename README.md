@@ -108,7 +108,7 @@ Output will show scraped jobs, any errors, and a summary of how many were added 
 ```
 job-autopilot/
 ├── main.py              # Entry point — orchestrates the pipeline
-├── scraper.py           # Fetches jobs via python-jobspy
+├── jobspy_service.py    # Fetches jobs via python-jobspy
 ├── qualifiar.py         # Gemini AI resume-to-job scoring
 ├── resume_processor.py  # PDF parsing and resume caching
 ├── sheets.py            # Google Sheets read/write
