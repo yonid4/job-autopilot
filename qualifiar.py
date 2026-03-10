@@ -1,6 +1,10 @@
+# Standard library
+import itertools
+
 # Third-party
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError
 from pydantic import BaseModel, Field
 
 # Local
@@ -8,7 +12,9 @@ from config import Config as config
 from job_model import Job
 from resume_processor import ResumeData
 
-client = genai.Client(api_key=config.GEMINI_API_KEY)
+_key_cycle = itertools.cycle(config.GEMINI_API_KEYS)
+_current_key = next(_key_cycle)
+client = genai.Client(api_key=_current_key)
 
 THRESHOLD = 80
 
@@ -76,18 +82,31 @@ For each job, provide a qualification score, reasoning, and matching strengths.
 
 
 def call_gemini(jobs: list[Job], resume: ResumeData) -> list[QualifierData]:
+    global client, _current_key
     prompt = _create_analysis_prompt(jobs, resume)
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        config=types.GenerateContentConfig(
-            system_instruction=prompt,
-            response_mime_type="application/json",
-            response_schema=list[QualifierData],
-        ),
-        contents="Analyze the jobs.",
-    )
-    return response.parsed
+    keys_tried = 0
+    while keys_tried < len(config.GEMINI_API_KEYS):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                config=types.GenerateContentConfig(
+                    system_instruction=prompt,
+                    response_mime_type="application/json",
+                    response_schema=list[QualifierData],
+                ),
+                contents="Analyze the jobs.",
+            )
+            return response.parsed
+        except ClientError as e:
+            if e.status_code == 429:
+                _current_key = next(_key_cycle)
+                client = genai.Client(api_key=_current_key)
+                print(f"[gemini] quota hit — rotating to next key")
+                keys_tried += 1
+            else:
+                raise
+    raise RuntimeError("All Gemini API keys exhausted their quota")
 
 
 def filtered_jobs(jobs: list[Job], resume: ResumeData) -> list[QualifierData]:
