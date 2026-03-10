@@ -2,7 +2,7 @@
 import os
 
 # Local
-import jobspy_service
+import linkedin_service
 import sheets
 from config import Config as config
 from qualifiar import filtered_jobs
@@ -20,15 +20,15 @@ def main() -> None:
         resume = process_resume(_RESUME_PDF_PATH)
         print("Resume processed and saved.")
 
-    print(f"Scraping: {config.SEARCH_TERM} in {config.LOCATION} across {config.SITE_NAMES}\n")
+    print(f"Scraping: {config.SEARCH_TERM} in {config.LOCATION}\n")
 
-    jobs, errors = jobspy_service.run_scrape()
+    jobs, errors = linkedin_service.run_scrape()
 
     for err in errors:
         print(f"[error] {err}")
 
     if not jobs:
-        print("No jobs returned from jobspy service.")
+        print("No jobs returned from linkedin service.")
         return
 
     existing_links = sheets.get_existing_links()
@@ -38,13 +38,6 @@ def main() -> None:
     if not new_jobs:
         print(f"No new jobs found ({duplicates} duplicates skipped).")
         return
-
-    # Post-filter by experience level (LinkedIn only — others always pass through)
-    if config.EXPERIENCE_LEVEL:
-        new_jobs = [
-            j for j in new_jobs
-            if j.job_level is None or j.job_level.lower() == config.EXPERIENCE_LEVEL.lower()
-        ]
 
     # Filter jobs using Gemini AI API using user's resume
     batch_size = 6

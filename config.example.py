@@ -12,11 +12,6 @@ class Config:
     LOCATION = "San Francisco, CA"
     RESULTS_WANTED = 20                 # max jobs to add per run
     HOURS_OLD = 2                       # only jobs posted in the last N hours (None = no limit)
-    DISTANCE = 50                       # miles
-
-    # --- Sites ---
-    # Options: "linkedin", "indeed", "glassdoor", "zip_recruiter", "google"
-    SITE_NAMES = ["linkedin", "indeed"]
 
     # --- Filters ---
     IS_REMOTE = False
@@ -26,14 +21,15 @@ class Config:
     # Note: only LinkedIn populates this field — other sites always pass through
     EXPERIENCE_LEVEL = "entry level"
 
-    # --- LinkedIn specific ---
-    # Fetches full description and direct job URL from LinkedIn (slower)
-    LINKEDIN_FETCH_DESCRIPTION = True
-
     # --- Google Sheet ---
     # Column order must match your Google Sheet exactly
     SHEET_TAB_NAME = "Tracking Template"
     STATUS_ON_SCRAPE = "Have Not Applied"
+
+    # --- LinkedIn Auth ---
+    # Get these from your browser cookies when logged into linkedin.com
+    LINKEDIN_LI_AT = os.getenv("LINKEDIN_LI_AT")
+    LINKEDIN_JSESSIONID = os.getenv("LINKEDIN_JSESSIONID")
 
     # --- GEMINI ---
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
