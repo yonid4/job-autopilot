@@ -5,3 +5,12 @@ google-genai==1.66.0
 python-dotenv==1.2.2
 pydantic==2.12.5
 PyPDF2==3.0.1
+
+# Phase 1: FastAPI + Supabase
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+pydantic-settings==2.9.1
+supabase==2.15.2
+PyJWT==2.10.1
+python-multipart==0.0.20
+pytest==9.0.2
