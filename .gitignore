@@ -1,7 +1,7 @@
 credentials/
 
 .env
-.venv
+.venv/
 
 resume.json
 resume.pdf
