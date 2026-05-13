@@ -46,31 +46,52 @@ jobs:
               from dotenv import load_dotenv
               load_dotenv()
               class Config:
-                  SEARCH_TERM = "software engineer"
-                  LOCATION = "San Francisco, CA"
-                  RESULTS_WANTED = 20
+                  SEARCH_TERM = "Software Engineer"
+                  LOCATION = "Mountain View, CA"
+                  RESULTS_WANTED = 500
                   HOURS_OLD = {hours_old}
                   DISTANCE = 50
-                  SITE_NAMES = ["linkedin", "indeed"]
+                  SITE_NAMES = ["linkedin", "indeed", "glassdoor", "zip_recruiter"]
+                  BLOCKED_COMPANIES: list[str] = ["Revature", "Epic"]
                   IS_REMOTE = False
                   JOB_TYPE = "fulltime"
                   EXPERIENCE_LEVEL = "entry level"
                   LINKEDIN_FETCH_DESCRIPTION = True
+                  LINKEDIN_LI_AT = os.getenv("LINKEDIN_LI_AT")
+                  LINKEDIN_JSESSIONID = os.getenv("LINKEDIN_JSESSIONID")
                   SHEET_TAB_NAME = "{sheet_name}"
                   STATUS_ON_SCRAPE = "Have Not Applied"
+                  _proxies_raw = os.getenv("PROXIES")
+                  PROXIES = [p.strip() for p in _proxies_raw.split(",")] if _proxies_raw else None
                   GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+                  _gemini_keys_raw = os.getenv("GEMINI_API_KEYS")
+                  GEMINI_API_KEYS: list[str] = (
+                      [k.strip() for k in _gemini_keys_raw.split(",") if k.strip()]
+                      if _gemini_keys_raw
+                      else ([GEMINI_API_KEY] if GEMINI_API_KEY else [])
+                  )
+                  GEMINI_PRIMARY_MODEL = os.getenv("GEMINI_PRIMARY_MODEL", "gemini-2.5-flash")
+                  GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.0-flash")
+                  GEMINI_BATCH_DELAY_SECONDS = 15
           """).strip()
           with open("config.py", "w") as f:
               f.write(snippet + "\n")
           EOF
 
-      - name: Write Google Sheets credentials
+      - name: Write credentials and resume
         env:
           GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
-        run: echo "$GOOGLE_SHEETS_CREDS" > credentials.json
+          RESUME_JSON: ${{ secrets.RESUME_JSON }}
+        run: |
+          echo "$GOOGLE_SHEETS_CREDS" > credentials.json
+          echo "$RESUME_JSON" > resume.json
 
       - name: Run scraper
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           SPREADSHEET_ID: ${{ secrets.SPREAD_SHEET_ID }}
+          LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
+          LINKEDIN_JSESSIONID: ${{ secrets.LINKEDIN_JSESSIONID }}
+          PROXIES: ${{ secrets.PROXIES }}
         run: python main.py
