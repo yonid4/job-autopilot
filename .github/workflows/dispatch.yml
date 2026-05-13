@@ -90,7 +90,8 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
-          SPREADSHEET_ID: ${{ secrets.SPREAD_SHEET_ID }}
+          GOOGLE_SHEET_ID: ${{ secrets.SPREAD_SHEET_ID }}
+          GOOGLE_CREDENTIALS_PATH: credentials.json
           LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
           LINKEDIN_JSESSIONID: ${{ secrets.LINKEDIN_JSESSIONID }}
           PROXIES: ${{ secrets.PROXIES }}
