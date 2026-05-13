@@ -1,0 +1,74 @@
+name: Run Job Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours_old:
+        description: "Only fetch jobs posted in the last N hours"
+        required: false
+        default: "12"
+      start_date:
+        description: "Only include jobs posted on or after this date (YYYY-MM-DD)"
+        required: false
+        default: ""
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write config.py
+        env:
+          HOURS_OLD: ${{ github.event.inputs.hours_old }}
+          START_DATE: ${{ github.event.inputs.start_date }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        run: |
+          python - <<'EOF'
+          import os, textwrap
+          hours_old = int(os.environ.get("HOURS_OLD") or 12)
+          start_date = os.environ.get("START_DATE") or ""
+          snippet = textwrap.dedent(f"""
+              import os
+              from dotenv import load_dotenv
+              load_dotenv()
+              class Config:
+                  SEARCH_TERM = "software engineer"
+                  LOCATION = "San Francisco, CA"
+                  RESULTS_WANTED = 20
+                  HOURS_OLD = {hours_old}
+                  DISTANCE = 50
+                  START_DATE = "{start_date}"
+                  SITE_NAMES = ["linkedin", "indeed"]
+                  IS_REMOTE = False
+                  JOB_TYPE = "fulltime"
+                  EXPERIENCE_LEVEL = "entry level"
+                  LINKEDIN_FETCH_DESCRIPTION = True
+                  SHEET_TAB_NAME = "Tracking Template"
+                  STATUS_ON_SCRAPE = "Have Not Applied"
+                  GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+          """).strip()
+          with open("config.py", "w") as f:
+              f.write(snippet + "\n")
+          EOF
+
+      - name: Write Google Sheets credentials
+        env:
+          GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
+        run: echo "$GOOGLE_SHEETS_CREDS" > credentials.json
+
+      - name: Run scraper
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        run: python main.py
