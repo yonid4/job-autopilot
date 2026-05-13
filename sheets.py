@@ -16,9 +16,9 @@ _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 _SHEET_ID = os.environ["GOOGLE_SHEET_ID"]
 _CREDENTIALS_PATH = os.environ["GOOGLE_CREDENTIALS_PATH"]
 
-# Column E (index 4) — "Link to Job Req"
-_LINK_COLUMN = "E"
-_LINK_COLUMN_INDEX = 4
+# Column G (index 6) — "Link to Job Req"
+_LINK_COLUMN = "G"
+_LINK_COLUMN_INDEX = 6
 
 
 def _get_service():
@@ -63,7 +63,7 @@ def append_jobs(jobs: list[Job]) -> None:
 
     Column order (must match sheet exactly):
     A: Company Name | B: Application Status | C: Title | D: Description
-    E: Link to Job Req | F: Notes | G: Rejection Reason | H: Salary | I: Date Submitted
+    E: Salary | F: Date Submitted | G: Link to Job Req | H: Rejection Reason | I: Notes
     """
     if not jobs:
         return
@@ -79,11 +79,11 @@ def append_jobs(jobs: list[Job]) -> None:
             config.STATUS_ON_SCRAPE,     # B: Application Status
             job.role or "",              # C: Title
             job.description or "",       # D: Description
-            job.link or "",              # E: Link to Job Req
-            "",                          # F: Notes
-            "N/A",                       # G: Rejection Reason
-            job.salary or "",            # H: Salary
-            "",                          # I: Date Submitted
+            job.salary or "",            # E: Salary
+            "",                          # F: Date Submitted
+            job.link or "",              # G: Link to Job Req
+            "N/A",                       # H: Rejection Reason
+            "",                          # I: Notes
         ]
         for job in jobs
     ]
