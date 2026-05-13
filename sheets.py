@@ -26,12 +26,43 @@ def _get_service():
     return build("sheets", "v4", credentials=creds).spreadsheets()
 
 
+_TEMPLATE_TAB = "Tracking Template"
+
+
+def _ensure_tab_exists(service) -> None:
+    """Create SHEET_TAB_NAME if it doesn't exist, copying headers from the template tab."""
+    spreadsheet = service.get(spreadsheetId=_SHEET_ID).execute()
+    existing = {s["properties"]["title"] for s in spreadsheet["sheets"]}
+
+    if config.SHEET_TAB_NAME in existing:
+        return
+
+    service.batchUpdate(
+        spreadsheetId=_SHEET_ID,
+        body={"requests": [{"addSheet": {"properties": {"title": config.SHEET_TAB_NAME}}}]},
+    ).execute()
+
+    if _TEMPLATE_TAB in existing:
+        result = service.values().get(
+            spreadsheetId=_SHEET_ID, range=f"{_TEMPLATE_TAB}!A1:Z1"
+        ).execute()
+        headers = result.get("values", [])
+        if headers:
+            service.values().update(
+                spreadsheetId=_SHEET_ID,
+                range=f"{config.SHEET_TAB_NAME}!A1",
+                valueInputOption="USER_ENTERED",
+                body={"values": headers},
+            ).execute()
+
+
 def get_existing_links() -> set[str]:
     """
     Read all values in the 'Link to Job Req' column and return them as a set.
     Used for deduplication before appending new jobs.
     """
     service = _get_service()
+    _ensure_tab_exists(service)
     range_ = f"{config.SHEET_TAB_NAME}!{_LINK_COLUMN}:{_LINK_COLUMN}"
     result = service.values().get(spreadsheetId=_SHEET_ID, range=range_).execute()
     rows = result.get("values", [])
