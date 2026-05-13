@@ -35,16 +35,22 @@ def _ensure_tab_exists(service) -> None:
     sheets = spreadsheet["sheets"]
     existing = {s["properties"]["title"]: s["properties"]["sheetId"] for s in sheets}
 
+    print(f"[sheets] target tab: '{config.SHEET_TAB_NAME}'")
+    print(f"[sheets] existing tabs: {list(existing.keys())}")
+
     if config.SHEET_TAB_NAME in existing:
+        print(f"[sheets] tab already exists, skipping creation")
         return
 
     if _TEMPLATE_TAB not in existing:
+        print(f"[sheets] template tab '{_TEMPLATE_TAB}' not found — creating blank tab")
         service.batchUpdate(
             spreadsheetId=_SHEET_ID,
             body={"requests": [{"addSheet": {"properties": {"title": config.SHEET_TAB_NAME}}}]},
         ).execute()
         return
 
+    print(f"[sheets] duplicating '{_TEMPLATE_TAB}' → '{config.SHEET_TAB_NAME}'")
     # Duplicate the template (copies all formatting, column widths, dropdowns, etc.)
     service.batchUpdate(
         spreadsheetId=_SHEET_ID,
@@ -61,6 +67,7 @@ def _ensure_tab_exists(service) -> None:
         range=f"{config.SHEET_TAB_NAME}!A2:Z",
         body={},
     ).execute()
+    print(f"[sheets] tab created successfully")
 
 
 def get_existing_links() -> set[str]:
