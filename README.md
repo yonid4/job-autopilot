@@ -58,7 +58,7 @@ The sheet has a tab named `"Tracking Template"` with these columns:
 
 | A | B | C | D | E | F | G | H | I |
 |---|---|---|---|---|---|---|---|---|
-| Company Name | Application Status | Title | Description | Salary | Date Submitted | Link to Job Req | Rejection Reason | Notes |
+| Company Name | Application Status | Title | Description | Link to Job Req | Notes | Rejection Reason | Salary | Date Submitted |
 
 Row 1 is the header row. The script writes into the first blank row in column A, preserving any existing formatting.
 
