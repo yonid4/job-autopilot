@@ -30,30 +30,38 @@ _TEMPLATE_TAB = "Tracking Template"
 
 
 def _ensure_tab_exists(service) -> None:
-    """Create SHEET_TAB_NAME if it doesn't exist, copying headers from the template tab."""
+    """Duplicate the template tab if SHEET_TAB_NAME doesn't exist, then clear data rows."""
     spreadsheet = service.get(spreadsheetId=_SHEET_ID).execute()
-    existing = {s["properties"]["title"] for s in spreadsheet["sheets"]}
+    sheets = spreadsheet["sheets"]
+    existing = {s["properties"]["title"]: s["properties"]["sheetId"] for s in sheets}
 
     if config.SHEET_TAB_NAME in existing:
         return
 
+    if _TEMPLATE_TAB not in existing:
+        # No template found — create a blank sheet as fallback
+        service.batchUpdate(
+            spreadsheetId=_SHEET_ID,
+            body={"requests": [{"addSheet": {"properties": {"title": config.SHEET_TAB_NAME}}}]},
+        ).execute()
+        return
+
+    # Duplicate the template (copies all formatting, column widths, dropdowns, etc.)
     service.batchUpdate(
         spreadsheetId=_SHEET_ID,
-        body={"requests": [{"addSheet": {"properties": {"title": config.SHEET_TAB_NAME}}}]},
+        body={"requests": [{"duplicateSheet": {
+            "sourceSheetId": existing[_TEMPLATE_TAB],
+            "insertSheetIndex": len(sheets),
+            "newSheetName": config.SHEET_TAB_NAME,
+        }}]},
     ).execute()
 
-    if _TEMPLATE_TAB in existing:
-        result = service.values().get(
-            spreadsheetId=_SHEET_ID, range=f"{_TEMPLATE_TAB}!A1:Z1"
-        ).execute()
-        headers = result.get("values", [])
-        if headers:
-            service.values().update(
-                spreadsheetId=_SHEET_ID,
-                range=f"{config.SHEET_TAB_NAME}!A1",
-                valueInputOption="USER_ENTERED",
-                body={"values": headers},
-            ).execute()
+    # Clear data rows so only the header remains
+    service.values().clear(
+        spreadsheetId=_SHEET_ID,
+        range=f"{config.SHEET_TAB_NAME}!A2:Z",
+        body={},
+    ).execute()
 
 
 def get_existing_links() -> set[str]:
