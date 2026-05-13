@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Code branch to run (feature/jobspy or feature/linkedin-only)"
+        description: "Code branch to run"
         required: false
-        default: "feature/jobspy"
+        default: "secret"
       hours_old:
         description: "Only fetch jobs posted in the last N hours"
         required: false
@@ -74,7 +74,7 @@ jobs:
                   GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.0-flash")
                   GEMINI_BATCH_DELAY_SECONDS = 15
           """).strip()
-          with open("config.py", "w") as f:
+          with open("legacy/config.py", "w") as f:
               f.write(snippet + "\n")
           EOF
 
@@ -84,7 +84,7 @@ jobs:
           RESUME_JSON: ${{ secrets.RESUME_JSON }}
         run: |
           echo "$GOOGLE_SHEETS_CREDS" > credentials.json
-          echo "$RESUME_JSON" > resume.json
+          echo "$RESUME_JSON" > legacy/resume.json
 
       - name: Run scraper
         env:
@@ -95,4 +95,4 @@ jobs:
           LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
           LINKEDIN_JSESSIONID: ${{ secrets.LINKEDIN_JSESSIONID }}
           PROXIES: ${{ secrets.PROXIES }}
-        run: python main.py
+        run: python legacy/main.py
