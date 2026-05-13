@@ -95,4 +95,4 @@ jobs:
           LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
           LINKEDIN_JSESSIONID: ${{ secrets.LINKEDIN_JSESSIONID }}
           PROXIES: ${{ secrets.PROXIES }}
-        run: python legacy/main.py
+        run: python main.py
