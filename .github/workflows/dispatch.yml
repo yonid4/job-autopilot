@@ -72,5 +72,5 @@ jobs:
       - name: Run scraper
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          SPREADSHEET_ID: ${{ secrets.SPREAD_SHEET_ID }}
         run: python main.py
