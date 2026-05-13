@@ -99,7 +99,7 @@ def call_gemini(jobs: list[Job], resume: ResumeData) -> list[QualifierData]:
             )
             return response.parsed
         except ClientError as e:
-            if e.status_code == 429:
+            if e.code == 429:
                 _current_key = next(_key_cycle)
                 client = genai.Client(api_key=_current_key)
                 print(f"[gemini] quota hit — rotating to next key")
