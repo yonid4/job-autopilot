@@ -4,7 +4,7 @@ import itertools
 # Third-party
 from google import genai
 from google.genai import types
-from google.genai.errors import ClientError
+from google.genai.errors import ClientError, ServerError
 from pydantic import BaseModel, Field
 
 # Local
@@ -17,6 +17,14 @@ _current_key = next(_key_cycle)
 client = genai.Client(api_key=_current_key)
 
 THRESHOLD = 80
+
+
+class GeminiOverloadError(Exception):
+    """Raised when Gemini returns 503 (high demand). Carries the prompt so the user can run it manually."""
+    def __init__(self, prompt: str):
+        self.prompt = prompt
+        super().__init__("Gemini 503: model overloaded — use fallback prompt")
+
 
 class QualifierData(BaseModel):
     qualification_score: int = Field(description="Overall qualification score (0-100)")
@@ -81,6 +89,21 @@ For each job, provide a qualification score, reasoning, and matching strengths.
 """.strip()
 
 
+def _create_fallback_prompt(jobs: list[Job], resume: ResumeData) -> str:
+    """Prompt variant with explicit JSON instructions for pasting directly into Gemini."""
+    base = _create_analysis_prompt(jobs, resume)
+    return base + """
+
+RESPONSE FORMAT:
+Reply with a valid JSON array only — no markdown fences, no extra text. Each element must have exactly these fields:
+- "qualification_score": integer 0-100
+- "ai_reasoning": string explaining the score
+- "matching_strengths": array of strings (key strengths that match the job)
+- "job_link": the exact URL from the job details above (copy it character-for-character)
+
+Jobs with qualification_score >= 80 are considered a good match."""
+
+
 def call_gemini(jobs: list[Job], resume: ResumeData) -> list[QualifierData]:
     global client, _current_key
     prompt = _create_analysis_prompt(jobs, resume)
@@ -106,6 +129,10 @@ def call_gemini(jobs: list[Job], resume: ResumeData) -> list[QualifierData]:
                 keys_tried += 1
             else:
                 raise
+        except ServerError as e:
+            if e.code == 503:
+                raise GeminiOverloadError(_create_fallback_prompt(jobs, resume))
+            raise
     raise RuntimeError("All Gemini API keys exhausted their quota")
 
 
