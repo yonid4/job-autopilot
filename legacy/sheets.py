@@ -26,11 +26,11 @@ def _get_service():
     return build("sheets", "v4", credentials=creds).spreadsheets()
 
 
-_TEMPLATE_TAB = "Tracking Template"
+_TEMPLATE_SPREADSHEET_ID = "1nq5tb-i-zVW7ZBCcT3GLHhX8smXZALLcC_kScNswNAQ"
 
 
 def _ensure_tab_exists(service) -> None:
-    """Duplicate the template tab if SHEET_TAB_NAME doesn't exist, then clear data rows."""
+    """Copy the first sheet from the template spreadsheet if SHEET_TAB_NAME doesn't exist."""
     spreadsheet = service.get(spreadsheetId=_SHEET_ID).execute()
     sheets = spreadsheet["sheets"]
     existing = {s["properties"]["title"]: s["properties"]["sheetId"] for s in sheets}
@@ -42,32 +42,35 @@ def _ensure_tab_exists(service) -> None:
         print(f"[sheets] tab already exists, skipping creation")
         return
 
-    if _TEMPLATE_TAB not in existing:
-        print(f"[sheets] template tab '{_TEMPLATE_TAB}' not found — creating blank tab")
-        service.batchUpdate(
-            spreadsheetId=_SHEET_ID,
-            body={"requests": [{"addSheet": {"properties": {"title": config.SHEET_TAB_NAME}}}]},
-        ).execute()
-        return
+    print(f"[sheets] fetching template from external spreadsheet")
+    template = service.get(spreadsheetId=_TEMPLATE_SPREADSHEET_ID).execute()
+    template_sheet_id = template["sheets"][0]["properties"]["sheetId"]
 
-    print(f"[sheets] duplicating '{_TEMPLATE_TAB}' → '{config.SHEET_TAB_NAME}'")
-    # Duplicate the template (copies all formatting, column widths, dropdowns, etc.)
+    # Copy the template sheet into the user's spreadsheet
+    result = service.sheets().copyTo(
+        spreadsheetId=_TEMPLATE_SPREADSHEET_ID,
+        sheetId=template_sheet_id,
+        body={"destinationSpreadsheetId": _SHEET_ID},
+    ).execute()
+
+    new_sheet_id = result["sheetId"]
+
+    # Rename from "Copy of ..." to the desired tab name
     service.batchUpdate(
         spreadsheetId=_SHEET_ID,
-        body={"requests": [{"duplicateSheet": {
-            "sourceSheetId": existing[_TEMPLATE_TAB],
-            "insertSheetIndex": len(sheets),
-            "newSheetName": config.SHEET_TAB_NAME,
+        body={"requests": [{"updateSheetProperties": {
+            "properties": {"sheetId": new_sheet_id, "title": config.SHEET_TAB_NAME},
+            "fields": "title",
         }}]},
     ).execute()
 
-    # Clear data rows so only the header remains
+    # Clear any data rows so only the header remains
     service.values().clear(
         spreadsheetId=_SHEET_ID,
         range=f"{config.SHEET_TAB_NAME}!A2:Z",
         body={},
     ).execute()
-    print(f"[sheets] tab created successfully")
+    print(f"[sheets] tab created from external template successfully")
 
 
 def get_existing_links() -> set[str]:
