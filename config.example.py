@@ -14,6 +14,14 @@ class Config:
     HOURS_OLD = 2                       # only jobs posted in the last N hours (None = no limit)
 
     # --- Filters ---
+    # Companies to skip entirely (case-insensitive). Add more via BLOCKED_COMPANIES env var
+    # (comma-separated, e.g. BLOCKED_COMPANIES="Google,Meta").
+    _blocked_extra = os.getenv("BLOCKED_COMPANIES")
+    BLOCKED_COMPANIES: list[str] = ["Revature", "Epic"] + (
+        [c.strip() for c in _blocked_extra.split(",") if c.strip()]
+        if _blocked_extra else []
+    )
+
     IS_REMOTE = False
     # Options: "fulltime", "parttime", "internship", "contract" (None = all)
     JOB_TYPE = "fulltime"

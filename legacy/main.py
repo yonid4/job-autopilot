@@ -67,6 +67,9 @@ def main() -> None:
     new_jobs = [j for j in jobs if j.link not in existing_links]
     duplicates = len(jobs) - len(new_jobs)
 
+    blocked = {c.lower() for c in config.BLOCKED_COMPANIES}
+    new_jobs = [j for j in new_jobs if (j.company or "").lower() not in blocked]
+
     if not new_jobs:
         print(f"No new jobs found ({duplicates} duplicates skipped).")
         return
