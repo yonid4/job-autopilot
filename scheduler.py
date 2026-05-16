@@ -2,8 +2,8 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from legacy.config import Config as config
-from legacy import main as job_main
+from config import Config as config
+import main as job_main
 
 PST = ZoneInfo("America/Los_Angeles")
 START_HOUR = 5   # 5am PST

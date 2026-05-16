@@ -9,7 +9,7 @@ from pydantic import BaseModel
 import PyPDF2
 
 # Local
-from legacy.config import Config as config
+from config import Config as config
 
 client = genai.Client(api_key=config.GEMINI_API_KEY)
 

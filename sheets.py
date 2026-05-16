@@ -7,8 +7,8 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
 # Local
-from legacy.config import Config as config
-from legacy.job_model import Job
+from config import Config as config
+from job_model import Job
 
 load_dotenv()
 

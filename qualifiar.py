@@ -8,9 +8,9 @@ from google.genai.errors import ClientError, ServerError
 from pydantic import BaseModel, Field
 
 # Local
-from legacy.config import Config as config
-from legacy.job_model import Job
-from legacy.resume_processor import ResumeData
+from config import Config as config
+from job_model import Job
+from resume_processor import ResumeData
 
 _key_cycle = itertools.cycle(config.GEMINI_API_KEYS)
 _current_key = next(_key_cycle)

@@ -7,8 +7,8 @@ from linkedin_api import Linkedin
 from requests.cookies import RequestsCookieJar
 
 # Local
-from legacy.config import Config as config
-from legacy.job_model import Job
+from config import Config as config
+from job_model import Job
 
 
 _EXPERIENCE_LEVEL_MAP = {
