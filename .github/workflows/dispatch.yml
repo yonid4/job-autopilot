@@ -74,7 +74,7 @@ jobs:
                   GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.0-flash")
                   GEMINI_BATCH_DELAY_SECONDS = 15
           """).strip()
-          with open("legacy/config.py", "w") as f:
+          with open("config.py", "w") as f:
               f.write(snippet + "\n")
           EOF
 
@@ -84,7 +84,7 @@ jobs:
           RESUME_JSON: ${{ secrets.RESUME_JSON }}
         run: |
           echo "$GOOGLE_SHEETS_CREDS" > credentials.json
-          echo "$RESUME_JSON" > legacy/resume.json
+          echo "$RESUME_JSON" > resume.json
 
       - name: Run scraper
         env:
