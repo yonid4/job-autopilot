@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from google.genai import types
 
 from app.core import database
 from app.services.gemini_service import embed_text, generate_with_rotation, _GENERATION_MODEL
+
+_UPLOAD_DIR = Path(__file__).resolve().parents[2] / "uploads" / "resumes"
 
 
 # ---------------------------------------------------------------------------
@@ -138,21 +141,17 @@ async def process_resume(
     """Full resume processing pipeline. Returns the new resume_id.
 
     Steps:
-    1. Upload PDF to Supabase Storage
+    1. Save PDF to local filesystem
     2. Parse PDF with Gemini vision
     3. Chunk the parsed resume
     4. Embed each chunk
     5. Store resume row + chunks in DB
     """
-    client = database.get_client()
-
-    # 1. Upload to Storage
-    storage_path = f"{user_id}/{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{filename}"
-    client.storage.from_("resumes").upload(
-        path=storage_path,
-        file=pdf_bytes,
-        file_options={"content-type": "application/pdf"},
-    )
+    # 1. Save to local storage
+    _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    storage_path = str(_UPLOAD_DIR / f"{user_id}_{ts}_{filename}")
+    Path(storage_path).write_bytes(pdf_bytes)
 
     # 2. Parse
     parsed = parse_resume_pdf(pdf_bytes)

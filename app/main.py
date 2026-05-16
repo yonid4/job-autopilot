@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.api.routes import router
+from app.core import database
 
-app = FastAPI(title="Job Autopilot v2")
+
+@asynccontextmanager
+async def lifespan(app):
+    database.init_db()
+    yield
+
+
+app = FastAPI(title="Job Autopilot v2", lifespan=lifespan)
 app.include_router(router)
 
 

@@ -63,15 +63,7 @@ async def upload_resume(
 @router.get("/resumes", response_model=list[ResumeOut])
 async def list_resumes(user_id: str = Depends(get_current_user_id)) -> list[dict]:
     """List all resume versions for the current user."""
-    result = (
-        database.get_client()
-        .table("resumes")
-        .select("id, user_id, label, storage_path, is_active")
-        .eq("user_id", user_id)
-        .order("created_at", desc=True)
-        .execute()
-    )
-    return result.data
+    return database.list_resumes(user_id)
 
 
 # ---------------------------------------------------------------------------

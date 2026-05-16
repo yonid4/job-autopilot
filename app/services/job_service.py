@@ -156,15 +156,7 @@ def _store_job(data: dict) -> dict:
 
 def list_jobs(limit: int = 50) -> list[dict]:
     """Return recently ingested jobs (shared across all users)."""
-    result = (
-        database.get_client()
-        .table("jobs")
-        .select("id, url, title, company, description, salary, job_level, created_at")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
-    return result.data
+    return database.list_jobs(limit=limit)
 
 
 # ---------------------------------------------------------------------------
