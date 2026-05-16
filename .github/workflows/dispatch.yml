@@ -6,7 +6,7 @@ on:
       branch:
         description: "Code branch to run"
         required: false
-        default: "secret"
+        default: "legacy-scraper"
       hours_old:
         description: "Only fetch jobs posted in the last N hours"
         required: false
