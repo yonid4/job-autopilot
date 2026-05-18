@@ -85,12 +85,25 @@ def append_jobs(jobs: list[dict]) -> None:
         return
 
     s = _settings()
+    print("[sheets] building service client...")
     service = _get_service()
+    print("[sheets] ensuring tab exists...")
     _ensure_tab_exists(service)
+    print("[sheets] tab ready, writing rows...")
 
     start_row = _get_first_empty_row(service)
     end_row = start_row + len(jobs) - 1
     range_ = f"{s.sheet_tab_name}!A{start_row}:I{end_row}"
+
+    def _notes(job: dict) -> str:
+        parts = []
+        if job.get("score") is not None:
+            parts.append(f"Score: {job['score']}/100")
+        if job.get("strengths"):
+            parts.append("Strengths:\n" + "\n".join(f"• {s}" for s in job["strengths"]))
+        if job.get("gaps"):
+            parts.append("Gaps:\n" + "\n".join(f"• {g}" for g in job["gaps"]))
+        return "\n\n".join(parts)
 
     rows = [
         [
@@ -99,7 +112,7 @@ def append_jobs(jobs: list[dict]) -> None:
             job.get("title") or "",
             job.get("description") or "",
             job.get("url") or "",
-            "",
+            _notes(job),
             "N/A",
             job.get("salary") or "",
             "",
