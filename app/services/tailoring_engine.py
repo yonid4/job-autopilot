@@ -44,6 +44,15 @@ def _fetch_resume_chunks(user_id: str, resume_id: str, jd_embedding: list[float]
     return [r["content"] for r in rows]
 
 
+def _get_jd_embedding(job: dict) -> list[float]:
+    if job.get("embedding"):
+        return job["embedding"]
+    jd_text = f"{job.get('title', '')} at {job.get('company', '')}\n\n{job.get('description', '')}"
+    embedding = embed_query(jd_text)
+    database.cache_job_embedding(job["id"], embedding)
+    return embedding
+
+
 def _build_hook_text(hook_project: dict | None) -> str | None:
     if not hook_project:
         return None
@@ -71,8 +80,7 @@ def tailor_resume(
     job = _resolve_job(job_id)
     resume = _resolve_resume(user_id, resume_id)
 
-    jd_text = f"{job.get('title', '')} at {job.get('company', '')}\n\n{job.get('description', '')}"
-    jd_embedding = embed_query(jd_text)
+    jd_embedding = _get_jd_embedding(job)
     resume_chunks = _fetch_resume_chunks(user_id, resume["id"], jd_embedding)
     job_description = job.get("description") or ""
 
@@ -123,8 +131,7 @@ def tailor_cover_letter(
     job = _resolve_job(job_id)
     resume = _resolve_resume(user_id, resume_id)
 
-    jd_text = f"{job.get('title', '')} at {job.get('company', '')}\n\n{job.get('description', '')}"
-    jd_embedding = embed_query(jd_text)
+    jd_embedding = _get_jd_embedding(job)
     resume_chunks = _fetch_resume_chunks(user_id, resume["id"], jd_embedding)
     job_description = job.get("description") or ""
 
@@ -172,8 +179,7 @@ def tailor_full(
     job = _resolve_job(job_id)
     resume = _resolve_resume(user_id, resume_id)
 
-    jd_text = f"{job.get('title', '')} at {job.get('company', '')}\n\n{job.get('description', '')}"
-    jd_embedding = embed_query(jd_text)
+    jd_embedding = _get_jd_embedding(job)
     resume_chunks = _fetch_resume_chunks(user_id, resume["id"], jd_embedding)
     job_description = job.get("description") or ""
 

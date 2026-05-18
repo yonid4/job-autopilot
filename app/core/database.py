@@ -352,6 +352,16 @@ def get_job_by_id(job_id: str) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
+def cache_job_embedding(job_id: str, embedding: list[float]) -> None:
+    con = _connect()
+    with con:
+        con.execute(
+            "UPDATE jobs SET embedding = ? WHERE id = ?",
+            (_dumps(embedding), job_id),
+        )
+    con.close()
+
+
 # ---------------------------------------------------------------------------
 # Applications
 # ---------------------------------------------------------------------------

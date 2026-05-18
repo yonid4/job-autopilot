@@ -194,13 +194,6 @@ def ingest_job_manual(url: str, title: str, company: str, description: str | Non
 
 
 def _store_job(data: dict) -> dict:
-    """Embed the job description and upsert into the jobs table."""
-    description = data.get("description") or ""
-    if description:
-        embed_input = f"{data.get('title', '')} at {data.get('company', '')}\n\n{description}"
-        embedding = embed_text(embed_input)
-        data["embedding"] = embedding
-
     return database.upsert_job(data)
 
 
