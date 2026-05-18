@@ -153,12 +153,9 @@ class TestIngestJobManual:
 
 class TestStoreJob:
     @patch("app.services.job_service.database.upsert_job")
-    @patch("app.services.job_service.embed_text")
-    def test_embeds_description_and_upserts(self, mock_embed, mock_upsert):
+    def test_upserts_without_embedding(self, mock_upsert):
         from app.services.job_service import _store_job
 
-        embedding = [0.1] * 768
-        mock_embed.return_value = embedding
         stored = _make_job_row()
         mock_upsert.return_value = stored
 
@@ -170,22 +167,21 @@ class TestStoreJob:
         }
         result = _store_job(data)
 
-        mock_embed.assert_called_once()
-        upsert_data = mock_upsert.call_args[0][0]
-        assert upsert_data["embedding"] == embedding
+        mock_upsert.assert_called_once_with(data)
         assert result is stored
 
     @patch("app.services.job_service.database.upsert_job")
-    @patch("app.services.job_service.embed_text")
-    def test_skips_embedding_when_no_description(self, mock_embed, mock_upsert):
+    def test_upserts_without_description(self, mock_upsert):
         from app.services.job_service import _store_job
 
         stored = _make_job_row(description=None)
         mock_upsert.return_value = stored
 
-        _store_job({"url": "https://x.com", "title": "T", "company": "C", "description": None})
+        data = {"url": "https://x.com", "title": "T", "company": "C", "description": None}
+        result = _store_job(data)
 
-        mock_embed.assert_not_called()
+        mock_upsert.assert_called_once_with(data)
+        assert result is stored
 
 
 # ---------------------------------------------------------------------------
