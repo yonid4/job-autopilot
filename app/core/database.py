@@ -81,6 +81,8 @@ def upsert_job(data: dict) -> dict:
     data = dict(data)
     if "id" not in data:
         data["id"] = str(uuid4())
+    data.setdefault("salary", None)
+    data.setdefault("job_level", None)
     data["title_company"] = _title_company(data["title"], data["company"])
     data["embedding"] = _dumps(data.get("embedding"))
 
