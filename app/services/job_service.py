@@ -88,6 +88,56 @@ def _scrape_linkedin_job(url: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Bulk search helpers
+# ---------------------------------------------------------------------------
+
+_EXPERIENCE_LEVEL_MAP = {
+    "internship": "1",
+    "entry level": "2",
+    "associate": "3",
+    "mid-senior level": "4",
+    "director": "5",
+    "executive": "6",
+}
+
+_JOB_TYPE_MAP = {
+    "fulltime": "F",
+    "parttime": "P",
+    "contract": "C",
+    "internship": "I",
+}
+
+
+def _build_search_kwargs() -> dict:
+    from app.config import settings
+
+    kwargs: dict = {
+        "keywords": settings.search_term,
+        "location_name": settings.location.replace(",", ""),
+        "limit": settings.results_wanted,
+    }
+    if settings.hours_old is not None:
+        kwargs["listed_at"] = settings.hours_old * 3600
+    level = (settings.experience_level or "").lower()
+    if level in _EXPERIENCE_LEVEL_MAP:
+        kwargs["experience"] = [_EXPERIENCE_LEVEL_MAP[level]]
+    jtype = (settings.job_type or "").lower()
+    if jtype in _JOB_TYPE_MAP:
+        kwargs["job_type"] = [_JOB_TYPE_MAP[jtype]]
+    if settings.is_remote:
+        kwargs["remote"] = ["2"]
+    return kwargs
+
+
+def _fetch_job_details(api, job_id: str) -> dict:
+    try:
+        time.sleep(random.uniform(2, 5))
+        return api.get_job(job_id)
+    except Exception:
+        return {}
+
+
+# ---------------------------------------------------------------------------
 # Dedup check
 # ---------------------------------------------------------------------------
 
@@ -157,6 +207,101 @@ def _store_job(data: dict) -> dict:
 def list_jobs(limit: int = 50) -> list[dict]:
     """Return recently ingested jobs (shared across all users)."""
     return database.list_jobs(limit=limit)
+
+
+def run_scrape(user_id: str) -> dict:
+    """Bulk LinkedIn search using config params. Returns {ingested, skipped, qualified, errors}."""
+    from app.config import settings
+
+    ingested = 0
+    skipped = 0
+    qualified = 0
+    errors: list[str] = []
+    new_jobs: list[dict] = []
+    blocked = {c.lower() for c in settings.blocked_companies}
+
+    try:
+        api = _build_linkedin_client()
+    except Exception as e:
+        return {"ingested": 0, "skipped": 0, "qualified": 0, "errors": [str(e)]}
+
+    try:
+        results = api.search_jobs(**_build_search_kwargs())
+    except Exception as e:
+        return {"ingested": 0, "skipped": 0, "qualified": 0, "errors": [f"LinkedIn search failed: {e}"]}
+
+    for result in results:
+        try:
+            entity = result.get("entityUrn", "")
+            job_id = entity.split(":")[-1] if entity else None
+            if not job_id:
+                skipped += 1
+                continue
+
+            url = f"https://www.linkedin.com/jobs/view/{job_id}"
+
+            if _find_existing_job(url):
+                skipped += 1
+                continue
+
+            details = _fetch_job_details(api, job_id)
+            company = _parse_company(details)
+
+            if company.lower() in blocked:
+                skipped += 1
+                continue
+
+            title = details.get("title") or result.get("title", "Unknown")
+            description = _parse_description(details)
+
+            job_data = {
+                "url": url,
+                "title": title,
+                "company": company,
+                "description": description[:10000] if description else None,
+            }
+            _store_job(job_data)
+            new_jobs.append(job_data)
+            ingested += 1
+        except Exception as e:
+            errors.append(str(e))
+
+    if not new_jobs or not settings.smart_google_sheet_id or not settings.google_credentials_path:
+        return {"ingested": ingested, "skipped": skipped, "qualified": 0, "errors": errors}
+
+    resume = database.get_active_resume(user_id)
+    if not resume:
+        print(f"[scrape] no active resume for user {user_id} — skipping qualification + sheet push")
+        return {"ingested": ingested, "skipped": skipped, "qualified": 0, "errors": errors}
+
+    resume_chunks = database.get_resume_chunks(resume["id"])
+    if not resume_chunks:
+        print(f"[scrape] resume {resume['id']} has no chunks — skipping qualification + sheet push")
+        return {"ingested": ingested, "skipped": skipped, "qualified": 0, "errors": errors}
+
+    from app.services import gemini_service, sheets_service
+
+    batch_size = settings.qualify_batch_size
+    qualified_jobs: list[dict] = []
+
+    for i in range(0, len(new_jobs), batch_size):
+        batch = new_jobs[i : i + batch_size]
+        try:
+            scored = gemini_service.qualify_jobs_batch(resume_chunks, batch)
+            for job in scored:
+                if job.get("score", 0) >= settings.min_fit_score:
+                    qualified_jobs.append(job)
+                    qualified += 1
+        except Exception as e:
+            errors.append(f"Qualification batch {i // batch_size + 1} failed: {e}")
+
+    if qualified_jobs:
+        try:
+            sheets_service.append_jobs(qualified_jobs)
+        except Exception as e:
+            errors.append(f"Sheets push failed: {e}")
+
+    return {"ingested": ingested, "skipped": skipped, "qualified": qualified, "errors": errors}
 
 
 # ---------------------------------------------------------------------------

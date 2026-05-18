@@ -69,6 +69,13 @@ class IngestJobRequest(BaseModel):
     url: str
 
 
+class ScrapeJobsResponse(BaseModel):
+    ingested: int
+    skipped: int
+    qualified: int = 0
+    errors: list[str]
+
+
 class JobManualCreate(BaseModel):
     url: str
     title: str

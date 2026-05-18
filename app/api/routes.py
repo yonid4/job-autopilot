@@ -14,6 +14,7 @@ from app.models.schemas import (
     ProjectCreate,
     ProjectOut,
     ResumeOut,
+    ScrapeJobsResponse,
     TailorCoverLetterRequest,
     TailorCoverLetterResult,
     TailorFullRequest,
@@ -107,6 +108,16 @@ async def list_jobs(
 ) -> list[dict]:
     """List recently ingested jobs."""
     return job_service.list_jobs(limit=limit)
+
+
+@router.post("/jobs/scrape", status_code=202)
+async def scrape_jobs(
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    """Kick off a bulk LinkedIn scrape using config search params. Runs in the background."""
+    background_tasks.add_task(job_service.run_scrape, user_id)
+    return {"status": "started", "message": "Scrape running in background"}
 
 
 # ---------------------------------------------------------------------------
