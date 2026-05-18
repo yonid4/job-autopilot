@@ -213,15 +213,26 @@ def run_scrape(user_id: str) -> dict:
     new_jobs: list[dict] = []
     blocked = {c.lower() for c in settings.blocked_companies}
 
+    search_kwargs = _build_search_kwargs()
+    print(f"[scrape] starting — keywords={search_kwargs.get('keywords')!r} "
+          f"location={search_kwargs.get('location_name')!r} "
+          f"limit={search_kwargs.get('limit')} "
+          f"listed_at={search_kwargs.get('listed_at')} "
+          f"experience={search_kwargs.get('experience')} "
+          f"job_type={search_kwargs.get('job_type')} "
+          f"remote={search_kwargs.get('remote')}")
+
     try:
         api = _build_linkedin_client()
     except Exception as e:
         return {"ingested": 0, "skipped": 0, "qualified": 0, "errors": [str(e)]}
 
     try:
-        results = api.search_jobs(**_build_search_kwargs())
+        results = api.search_jobs(**search_kwargs)
     except Exception as e:
         return {"ingested": 0, "skipped": 0, "qualified": 0, "errors": [f"LinkedIn search failed: {e}"]}
+
+    print(f"[scrape] LinkedIn returned {len(results)} result(s)")
 
     for result in results:
         try:
@@ -241,6 +252,7 @@ def run_scrape(user_id: str) -> dict:
             company = _parse_company(details)
 
             if company.lower() in blocked:
+                print(f"[scrape] blocked  — {company}")
                 skipped += 1
                 continue
 
@@ -256,8 +268,12 @@ def run_scrape(user_id: str) -> dict:
             _store_job(job_data)
             new_jobs.append(job_data)
             ingested += 1
+            print(f"[scrape] ingested  — {title} @ {company}  {url}")
         except Exception as e:
+            print(f"[scrape] error     — {e}")
             errors.append(str(e))
+
+    print(f"[scrape] done — ingested={ingested} skipped={skipped} errors={len(errors)}")
 
     if not new_jobs or not settings.smart_google_sheet_id or not settings.google_credentials_path:
         return {"ingested": ingested, "skipped": skipped, "qualified": 0, "errors": errors}
@@ -282,18 +298,25 @@ def run_scrape(user_id: str) -> dict:
         try:
             scored = gemini_service.qualify_jobs_batch(resume_chunks, batch)
             for job in scored:
-                if job.get("score", 0) >= settings.min_fit_score:
+                score = job.get("score", 0)
+                print(f"[qualify] {job.get('title')} @ {job.get('company')} — score={score}")
+                if score >= settings.min_fit_score:
                     qualified_jobs.append(job)
                     qualified += 1
         except Exception as e:
+            print(f"[qualify] batch {i // batch_size + 1} failed — {e}")
             errors.append(f"Qualification batch {i // batch_size + 1} failed: {e}")
 
     if qualified_jobs:
         try:
+            print(f"[scrape] pushing {len(qualified_jobs)} qualified job(s) to sheet...")
             sheets_service.append_jobs(qualified_jobs)
+            print(f"[scrape] sheet push done")
         except Exception as e:
+            print(f"[scrape] sheet push failed — {e}")
             errors.append(f"Sheets push failed: {e}")
 
+    print(f"[scrape] all done — ingested={ingested} qualified={qualified} pushed to sheet={len(qualified_jobs)} errors={len(errors)}")
     return {"ingested": ingested, "skipped": skipped, "qualified": qualified, "errors": errors}
 
 
