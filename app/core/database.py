@@ -218,6 +218,17 @@ def delete_resume_chunks(resume_id: str) -> None:
     con.close()
 
 
+def get_resume_chunks(resume_id: str) -> list[str]:
+    """Return all chunk content strings for a resume, ordered by chunk_index."""
+    con = _connect()
+    rows = con.execute(
+        "SELECT content FROM resume_chunks WHERE resume_id = ? ORDER BY chunk_index",
+        (resume_id,),
+    ).fetchall()
+    con.close()
+    return [r["content"] for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # Resume helpers
 # ---------------------------------------------------------------------------

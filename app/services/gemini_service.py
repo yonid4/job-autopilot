@@ -106,6 +106,13 @@ class _QualifyResult(BaseModel):
     gaps: list[str] = Field(description="Notable gaps or missing requirements")
 
 
+class _BatchQualifyResult(BaseModel):
+    job_url: str = Field(description="Copy the job URL exactly as provided")
+    score: int = Field(ge=0, le=100)
+    strengths: list[str]
+    gaps: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Generation functions
 # ---------------------------------------------------------------------------
@@ -212,3 +219,67 @@ Requirements:
         config=types.GenerateContentConfig(),
         contents=prompt,
     ).strip()
+
+
+def qualify_jobs_batch(resume_chunks: list[str], jobs: list[dict]) -> list[dict]:
+    """Qualify multiple jobs in one Gemini call.
+
+    Each job dict must have: url, title, company, description.
+    Returns the same list enriched with score/strengths/gaps for each job.
+    Jobs that fail to match a Gemini result keep score=0.
+    """
+    if not jobs:
+        return []
+
+    import json as _json
+
+    resume_text = "\n\n".join(resume_chunks)
+
+    jobs_block = "\n\n".join(
+        f"JOB {i + 1}:\nURL: {j['url']}\nTitle: {j.get('title', '')}\n"
+        f"Company: {j.get('company', '')}\nDescription:\n{(j.get('description') or '')[:3000]}"
+        for i, j in enumerate(jobs)
+    )
+
+    prompt = f"""You are an expert job qualification analyst.
+
+CANDIDATE RESUME (relevant sections):
+{resume_text}
+
+Rate each job below against this candidate's resume.
+
+SCORING GUIDELINES:
+- 90-100: Excellent match — exceeds most requirements
+- 70-89: Good match — meets most requirements with minor gaps
+- 55-69: Moderate match — some relevant experience, significant gaps
+- 40-54: Poor match — major qualification gaps
+- 1-39: Very poor match — fundamental misalignment
+
+{jobs_block}
+
+Return a JSON array with one object per job, in the same order:
+[{{"job_url": "<exact URL>", "score": <int>, "strengths": [...], "gaps": [...]}}]"""
+
+    raw = generate_with_rotation(
+        model=_GENERATION_MODEL,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=list[_BatchQualifyResult],
+        ),
+        contents=prompt,
+    )
+
+    try:
+        results = [_BatchQualifyResult.model_validate(r) for r in _json.loads(raw)]
+    except Exception:
+        return [dict(j, score=0, strengths=[], gaps=[]) for j in jobs]
+
+    by_url = {r.job_url: r for r in results}
+    enriched = []
+    for job in jobs:
+        result = by_url.get(job["url"])
+        if result:
+            enriched.append(dict(job, score=result.score, strengths=result.strengths, gaps=result.gaps))
+        else:
+            enriched.append(dict(job, score=0, strengths=[], gaps=[]))
+    return enriched
