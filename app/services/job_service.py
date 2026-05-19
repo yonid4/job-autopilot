@@ -234,6 +234,16 @@ def run_scrape(user_id: str) -> dict:
 
     print(f"[scrape] LinkedIn returned {len(results)} result(s)")
 
+    # Load existing sheet links once so manually added jobs are respected during dedup
+    existing_sheet_links: set[str] = set()
+    if settings.smart_google_sheet_id and settings.google_credentials_path:
+        try:
+            from app.services import sheets_service
+            existing_sheet_links = sheets_service.get_existing_links()
+            print(f"[scrape] loaded {len(existing_sheet_links)} existing link(s) from sheet")
+        except Exception as e:
+            print(f"[scrape] could not load sheet links — {e}")
+
     for result in results:
         try:
             entity = result.get("entityUrn", "")
@@ -244,7 +254,7 @@ def run_scrape(user_id: str) -> dict:
 
             url = f"https://www.linkedin.com/jobs/view/{job_id}"
 
-            if _find_existing_job(url):
+            if url in existing_sheet_links or _find_existing_job(url):
                 skipped += 1
                 continue
 
