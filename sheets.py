@@ -128,7 +128,7 @@ def append_jobs(jobs: list[Job]) -> None:
             job.role or "",              # C: Title
             job.description or "",       # D: Description
             job.link or "",              # E: Link to Job Req
-            "",                          # F: Notes
+            job.notes or "",              # F: Notes
             "N/A",                       # G: Rejection Reason
             job.salary or "",            # H: Salary
             "",                          # I: Date Submitted

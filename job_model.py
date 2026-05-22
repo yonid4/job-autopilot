@@ -15,3 +15,4 @@ class Job(BaseModel):
     date_submitted: Optional[datetime] = None
     link: Optional[str] = None
     job_level: Optional[str] = None
+    notes: Optional[str] = None

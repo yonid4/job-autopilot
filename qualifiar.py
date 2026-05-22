@@ -136,8 +136,15 @@ def call_gemini(jobs: list[Job], resume: ResumeData) -> list[QualifierData]:
     raise RuntimeError("All Gemini API keys exhausted their quota")
 
 
-def filtered_jobs(jobs: list[Job], resume: ResumeData) -> list[QualifierData]:
+def filtered_jobs(jobs: list[Job], resume: ResumeData) -> list[Job]:
     analyzed_jobs = call_gemini(jobs, resume)
 
     link_to_job = {job.link: job for job in jobs}
-    return [link_to_job[result.job_link] for result in analyzed_jobs if result.qualification_score >= THRESHOLD and result.job_link in link_to_job]
+    result_jobs = []
+    for result in analyzed_jobs:
+        if result.qualification_score >= THRESHOLD and result.job_link in link_to_job:
+            job = link_to_job[result.job_link].model_copy()
+            strengths = "; ".join(result.matching_strengths) if result.matching_strengths else ""
+            job.notes = f"Score: {result.qualification_score}/100. {result.ai_reasoning}" + (f" Strengths: {strengths}" if strengths else "")
+            result_jobs.append(job)
+    return result_jobs
