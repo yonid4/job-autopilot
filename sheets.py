@@ -20,6 +20,10 @@ _CREDENTIALS_PATH = os.environ["GOOGLE_CREDENTIALS_PATH"]
 _LINK_COLUMN = "E"
 _LINK_COLUMN_INDEX = 4
 
+# Column J (index 9) — "Score"; numeric sort key
+_SCORE_COLUMN_INDEX = 9
+_LAST_COLUMN_INDEX = 10  # columns A:J are written by append_jobs
+
 
 def _get_service():
     creds = Credentials.from_service_account_file(_CREDENTIALS_PATH, scopes=_SCOPES)
@@ -104,14 +108,47 @@ def _get_first_empty_row(service) -> int:
     return len(rows) + 1
 
 
+def _get_sheet_id(service) -> int:
+    """Resolve the numeric sheetId for the configured tab (needed by sortRange)."""
+    spreadsheet = service.get(spreadsheetId=_SHEET_ID).execute()
+    for s in spreadsheet["sheets"]:
+        if s["properties"]["title"] == config.SHEET_TAB_NAME:
+            return s["properties"]["sheetId"]
+    raise ValueError(f"Sheet tab {config.SHEET_TAB_NAME!r} not found")
+
+
+def _sort_by_score_desc(service, last_row: int) -> None:
+    """Sort data rows (row 2..last_row) by column J (Score) descending (Z→A)."""
+    if last_row < 2:
+        return
+    sheet_id = _get_sheet_id(service)
+    service.batchUpdate(
+        spreadsheetId=_SHEET_ID,
+        body={"requests": [{"sortRange": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 1,            # skip header row
+                "endRowIndex": last_row,       # exclusive end == 1-based last data row
+                "startColumnIndex": 0,
+                "endColumnIndex": _LAST_COLUMN_INDEX,
+            },
+            "sortSpecs": [{
+                "dimensionIndex": _SCORE_COLUMN_INDEX,
+                "sortOrder": "DESCENDING",
+            }],
+        }}]},
+    ).execute()
+
+
 def append_jobs(jobs: list[Job]) -> None:
     """
     Write jobs into existing pre-formatted empty rows starting at the first blank
     Company Name row. Uses update (not insert) so cell formatting is preserved.
+    Sorts the tab by column J (Score) descending once all rows are written.
 
     Column order (must match sheet exactly):
     A: Company Name | B: Application Status | C: Title | D: Description
-    E: Link to Job Req | F: Notes | G: Rejection Reason | H: Salary | I: Date Submitted
+    E: Link to Job Req | F: Notes | G: Rejection Reason | H: Salary | I: Date Submitted | J: Score
     """
     if not jobs:
         return
@@ -119,7 +156,7 @@ def append_jobs(jobs: list[Job]) -> None:
     service = _get_service()
     start_row = _get_first_empty_row(service)
     end_row = start_row + len(jobs) - 1
-    range_ = f"{config.SHEET_TAB_NAME}!A{start_row}:I{end_row}"
+    range_ = f"{config.SHEET_TAB_NAME}!A{start_row}:J{end_row}"
 
     rows = [
         [
@@ -128,10 +165,11 @@ def append_jobs(jobs: list[Job]) -> None:
             job.role or "",              # C: Title
             job.description or "",       # D: Description
             job.link or "",              # E: Link to Job Req
-            job.notes or "",              # F: Notes
+            job.notes or "",             # F: Notes
             "N/A",                       # G: Rejection Reason
             job.salary or "",            # H: Salary
             "",                          # I: Date Submitted
+            job.score if job.score is not None else "",  # J: Score (numeric sort key)
         ]
         for job in jobs
     ]
@@ -142,3 +180,7 @@ def append_jobs(jobs: list[Job]) -> None:
         valueInputOption="USER_ENTERED",
         body={"values": rows},
     ).execute()
+
+    print("[sheets] sorting rows by column J (Score, Z→A)...")
+    _sort_by_score_desc(service, end_row)
+    print("[sheets] sort done")

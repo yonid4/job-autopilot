@@ -144,6 +144,7 @@ def filtered_jobs(jobs: list[Job], resume: ResumeData) -> list[Job]:
     for result in analyzed_jobs:
         if result.qualification_score >= THRESHOLD and result.job_link in link_to_job:
             job = link_to_job[result.job_link].model_copy()
+            job.score = result.qualification_score
             strengths = "; ".join(result.matching_strengths) if result.matching_strengths else ""
             job.notes = f"Score: {result.qualification_score}/100. {result.ai_reasoning}" + (f" Strengths: {strengths}" if strengths else "")
             result_jobs.append(job)

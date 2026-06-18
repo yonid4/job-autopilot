@@ -16,3 +16,4 @@ class Job(BaseModel):
     link: Optional[str] = None
     job_level: Optional[str] = None
     notes: Optional[str] = None
+    score: Optional[int] = None
