@@ -20,6 +20,14 @@ _SCRAPERS: dict[str, ScrapeFn] = {
     "hiringcafe": hiringcafe_service.run_scrape,
 }
 
+# Optional post-filter enrichers: fetch heavy per-job data (e.g. full
+# descriptions) only for jobs that survive dedup/block filtering. Mutate jobs in
+# place and return a list of error strings. Scrapers without one are left as-is.
+EnrichFn = Callable[[list[Job]], list[str]]
+_ENRICHERS: dict[str, EnrichFn] = {
+    "hiringcafe": hiringcafe_service.enrich_descriptions,
+}
+
 
 def _select_scraper() -> tuple[str, ScrapeFn] | tuple[None, None]:
     """Resolve which scraper to run.
@@ -74,7 +82,7 @@ def main() -> None:
         print("Resume processed and saved.")
 
     scraper_name, scrape_fn = _select_scraper()
-    if scrape_fn is None:
+    if scraper_name is None or scrape_fn is None:
         print(f"Unknown SCRAPER {os.getenv('SCRAPER') or getattr(config, 'SCRAPER', None)!r}. "
               f"Valid options: {', '.join(_SCRAPERS)}.")
         return
@@ -100,6 +108,13 @@ def main() -> None:
     if not new_jobs:
         print(f"No new jobs found ({duplicates} duplicates skipped).")
         return
+
+    # Fetch heavy per-job data (e.g. full descriptions) only for the jobs that
+    # survived dedup/block filtering, before they go to Gemini qualification.
+    enrich_fn = _ENRICHERS.get(scraper_name)
+    if enrich_fn:
+        for err in enrich_fn(new_jobs):
+            print(f"[error] {err}")
 
     # Filter jobs using Gemini AI API using user's resume
     batch_size = 6
