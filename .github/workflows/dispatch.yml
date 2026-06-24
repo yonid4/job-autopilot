@@ -12,9 +12,9 @@ on:
         required: false
         default: "12"
       sheet_name:
-        description: "Sheet tab to write jobs into (created if it doesn't exist)"
+        description: "Sheet tab to write jobs into (created if it doesn't exist; blank = today's Pacific date, e.g. 'Jun 24')"
         required: false
-        default: "Tracking Template"
+        default: ""
       scraper:
         description: "Which scraper to run"
         required: false
@@ -47,8 +47,12 @@ jobs:
         run: |
           python - <<'EOF'
           import os, textwrap
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
           hours_old = int(os.environ.get("HOURS_OLD") or 12)
-          sheet_name = os.environ.get("SHEET_NAME") or "Tracking Template"
+          # Default the sheet tab to today's date in Pacific time, e.g. "Jun 24".
+          today_pst = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%b %-d")
+          sheet_name = os.environ.get("SHEET_NAME") or today_pst
           snippet = textwrap.dedent(f"""
               import os
               from dotenv import load_dotenv
