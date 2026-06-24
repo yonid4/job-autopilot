@@ -31,7 +31,8 @@ class Config:
     # Options: "fulltime", "parttime", "internship", "contract" (None = all)
     JOB_TYPE = "fulltime"
     # Options: "internship", "entry level", "associate", "mid-senior level", "director", "executive" (None = all)
-    # Note: only LinkedIn populates this field — other sites always pass through
+    # Note: LinkedIn and hiring.cafe honor this; other sites pass through.
+    # hiring.cafe only has 4 coarse buckets, so finer levels map to the nearest.
     EXPERIENCE_LEVEL = "entry level"
 
     # --- Google Sheet ---

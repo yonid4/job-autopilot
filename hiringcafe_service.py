@@ -36,6 +36,28 @@ _MAX_PAGES = 25            # safety cap on pagination
 _DESCRIPTION_MAX_CHARS = 10000
 _DEFAULT_RADIUS_MILES = 50  # matches hiring.cafe's own defaultRadius
 
+# config.JOB_TYPE -> hiring.cafe `commitmentTypes` facet values. The site rejects
+# unknown values (returns zero hits), so these strings must match exactly.
+_COMMITMENT_TYPE_MAP = {
+    "fulltime": "Full Time",
+    "parttime": "Part Time",
+    "contract": "Contract",
+    "internship": "Internship",
+}
+
+# config.EXPERIENCE_LEVEL -> hiring.cafe `seniorityLevel` facet values. hiring.cafe
+# exposes only four coarse buckets (No Prior Experience Required, Entry Level, Mid
+# Level, Senior Level), so the finer LinkedIn-style levels collapse onto the
+# nearest hiring.cafe value(s).
+_SENIORITY_LEVEL_MAP = {
+    "internship": ["No Prior Experience Required"],
+    "entry level": ["Entry Level", "No Prior Experience Required"],
+    "associate": ["Mid Level"],
+    "mid-senior level": ["Mid Level", "Senior Level"],
+    "director": ["Senior Level"],
+    "executive": ["Senior Level"],
+}
+
 
 def _session() -> requests.Session:
     s = requests.Session()
@@ -127,6 +149,14 @@ def _build_search_state(session: requests.Session) -> dict:
 
     if config.IS_REMOTE:
         state["workplaceTypes"] = ["Remote"]
+
+    job_type = (config.JOB_TYPE or "").lower()
+    if job_type in _COMMITMENT_TYPE_MAP:
+        state["commitmentTypes"] = [_COMMITMENT_TYPE_MAP[job_type]]
+
+    experience = (config.EXPERIENCE_LEVEL or "").lower()
+    if experience in _SENIORITY_LEVEL_MAP:
+        state["seniorityLevel"] = _SENIORITY_LEVEL_MAP[experience]
 
     # hiring.cafe only exposes a coarse, day-based "fetched" filter. Map HOURS_OLD
     # up to whole days (1 day minimum) as a best-effort recency bound.
