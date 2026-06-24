@@ -4,7 +4,7 @@ Automatically scrapes job postings, filters them against your resume using Gemin
 
 ## How It Works
 
-1. **Scrapes** job listings directly from LinkedIn using cookie-based authentication via the `linkedin-api` library
+1. **Scrapes** job listings from your chosen source — LinkedIn (cookie-based auth via the `linkedin-api` library) or [hiring.cafe](https://hiring.cafe) (no authentication required). Select one with the `SCRAPER` config variable.
 2. **Parses** your resume PDF using Gemini to extract structured data (cached as `resume.json`)
 3. **Qualifies** each job by scoring resume-to-job fit with Gemini AI — only jobs scoring ≥ 80/100 pass
 4. **Writes** new qualifying jobs to your Google Sheet, skipping duplicates
@@ -15,7 +15,7 @@ Automatically scrapes job postings, filters them against your resume using Gemin
 - A [Google Cloud Service Account](https://console.cloud.google.com/) with the Sheets API enabled
 - A [Gemini API key](https://aistudio.google.com/app/apikey)
 - A Google Sheet set up with the column layout described below
-- LinkedIn account cookies (`li_at` and `JSESSIONID`) — see below
+- LinkedIn account cookies (`li_at` and `JSESSIONID`) — only required for the LinkedIn scraper (see below)
 
 ## Setup
 
@@ -49,7 +49,9 @@ LINKEDIN_JSESSIONID=your_jsessionid_cookie_value
 
 ### 3. Getting LinkedIn Cookies
 
-The scraper authenticates with LinkedIn using session cookies from your browser.
+> Only needed if you use the LinkedIn scraper (`SCRAPER = "linkedin"`). The hiring.cafe scraper requires no authentication — you can skip this step.
+
+The LinkedIn scraper authenticates using session cookies from your browser.
 
 1. Log into [linkedin.com](https://www.linkedin.com) in your browser
 2. Open DevTools (`F12` or `Cmd+Option+I`)
@@ -97,36 +99,50 @@ cp config.example.py config.py
 Edit `config.py` to customize your search (`config.py` is gitignored — each user keeps their own):
 
 ```python
-SEARCH_TERM = "software engineer"
+SCRAPER = "linkedin"         # which scraper to run: "linkedin" or "hiringcafe"
+
+SEARCH_TERM = "Software Development"
 LOCATION = "San Francisco, CA"
 RESULTS_WANTED = 20          # max jobs to add per run
 HOURS_OLD = 2                # only jobs posted in the last N hours (None = no limit)
 
+# Companies to skip entirely (case-insensitive)
+BLOCKED_COMPANIES = ["Revature", "Epic"]
+
 IS_REMOTE = False
 JOB_TYPE = "fulltime"        # "fulltime", "parttime", "internship", "contract", or None
 EXPERIENCE_LEVEL = "entry level"  # None = all levels
+# Note: hiring.cafe exposes only 4 coarse seniority buckets, so finer levels map to the nearest.
 
 SHEET_TAB_NAME = "Tracking Template"
 STATUS_ON_SCRAPE = "Have Not Applied"
 
-# LinkedIn credentials are read from .env — see step 2
+# LinkedIn credentials are read from .env — only needed when SCRAPER = "linkedin"
 ```
+
+`SCRAPER` can also be overridden at runtime via the `SCRAPER` environment variable
+(e.g. `SCRAPER=hiringcafe python3 main.py`), which takes precedence over the value
+in `config.py`. `BLOCKED_COMPANIES` can likewise be extended via the
+`BLOCKED_COMPANIES` env var (comma-separated, e.g. `BLOCKED_COMPANIES="Google,Meta"`).
 
 ## Running
 
 ```bash
 source .venv/bin/activate
-python3 main.py
+python3 main.py                      # uses SCRAPER from config.py
+SCRAPER=hiringcafe python3 main.py   # override the scraper for this run
 ```
 
+`main.py` runs the scraper named by `SCRAPER` (the `SCRAPER` env var wins over `config.py`).
 Output will show scraped jobs, any errors, and a summary of how many were added vs. skipped as duplicates.
 
 ## Project Structure
 
 ```
 job-autopilot/
-├── main.py              # Entry point — orchestrates the pipeline
+├── main.py              # Entry point — selects scraper and orchestrates the pipeline
 ├── linkedin_service.py  # Fetches jobs via LinkedIn API (cookie auth)
+├── hiringcafe_service.py # Fetches jobs from hiring.cafe (no auth)
 ├── qualifiar.py         # Gemini AI resume-to-job scoring
 ├── resume_processor.py  # PDF parsing and resume caching
 ├── sheets.py            # Google Sheets read/write
