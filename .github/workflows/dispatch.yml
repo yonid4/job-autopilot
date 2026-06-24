@@ -15,6 +15,14 @@ on:
         description: "Sheet tab to write jobs into (created if it doesn't exist)"
         required: false
         default: "Tracking Template"
+      scraper:
+        description: "Which scraper to run"
+        required: false
+        default: "linkedin"
+        type: choice
+        options:
+          - linkedin
+          - hiringcafe
 
 jobs:
   scrape:
@@ -88,6 +96,7 @@ jobs:
 
       - name: Run scraper
         env:
+          SCRAPER: ${{ github.event.inputs.scraper }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           GOOGLE_SHEET_ID: ${{ secrets.SPREAD_SHEET_ID }}
