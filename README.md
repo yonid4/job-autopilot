@@ -91,6 +91,15 @@ uvicorn app.main:app --reload
 
 The API is available at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
 
+For a simple UI over all features, run the Streamlit app in a second terminal (the API must be running):
+
+```bash
+source .venv/bin/activate
+streamlit run ui.py
+```
+
+The UI opens at `http://localhost:8501`. Set `JOB_AUTOPILOT_API_URL` if the API is not on `http://localhost:8000`.
+
 ```bash
 pytest tests/ -v   # run tests
 ```
