@@ -202,9 +202,34 @@ def list_jobs(limit: int = 50) -> list[dict]:
     return database.list_jobs(limit=limit)
 
 
-def run_scrape(user_id: str) -> dict:
+_SCRAPE_OVERRIDE_FIELDS = (
+    "search_term",
+    "location",
+    "results_wanted",
+    "hours_old",
+    "distance",
+    "is_remote",
+    "job_type",
+    "experience_level",
+    "blocked_companies",
+    "min_fit_score",
+    "qualify_batch_size",
+    "sheet_tab_name",
+)
+
+
+def run_scrape(user_id: str, overrides: dict | None = None) -> dict:
     """Bulk LinkedIn search using config params. Returns {ingested, skipped, qualified, errors}."""
     from app.config import settings
+
+    if overrides:
+        for field in _SCRAPE_OVERRIDE_FIELDS:
+            if field not in overrides:
+                continue
+            value = overrides[field]
+            if value is None or (isinstance(value, str) and not value.strip()):
+                continue
+            setattr(settings, field, value)
 
     ingested = 0
     skipped = 0

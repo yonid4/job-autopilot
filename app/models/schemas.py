@@ -41,6 +41,10 @@ class ResumeOut(BaseModel):
     is_active: bool
 
 
+class ResumeDetailOut(ResumeOut):
+    parsed_json: dict | None = None
+
+
 # ---------------------------------------------------------------------------
 # User projects
 # ---------------------------------------------------------------------------
@@ -74,6 +78,23 @@ class ScrapeJobsResponse(BaseModel):
     skipped: int
     qualified: int = 0
     errors: list[str]
+
+
+class ScrapeConfig(BaseModel):
+    """Editable (non-secret) scrape + qualification settings."""
+
+    search_term: str
+    location: str
+    results_wanted: int
+    hours_old: int | None = None
+    distance: int
+    is_remote: bool
+    job_type: str | None = None
+    experience_level: str | None = None
+    blocked_companies: list[str] = []
+    min_fit_score: int
+    qualify_batch_size: int
+    sheet_tab_name: str = ""
 
 
 class JobManualCreate(BaseModel):

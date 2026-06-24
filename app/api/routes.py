@@ -13,7 +13,9 @@ from app.models.schemas import (
     JobOut,
     ProjectCreate,
     ProjectOut,
+    ResumeDetailOut,
     ResumeOut,
+    ScrapeConfig,
     ScrapeJobsResponse,
     TailorCoverLetterRequest,
     TailorCoverLetterResult,
@@ -67,6 +69,31 @@ async def list_resumes(user_id: str = Depends(get_current_user_id)) -> list[dict
     return database.list_resumes(user_id)
 
 
+@router.get("/resumes/{resume_id}", response_model=ResumeDetailOut)
+async def get_resume(
+    resume_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    """Get a single resume including its parsed content."""
+    resume = database.get_resume_by_id(resume_id)
+    if not resume or str(resume["user_id"]) != user_id:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return resume
+
+
+@router.patch("/resumes/{resume_id}/active", response_model=ResumeOut)
+async def activate_resume(
+    resume_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    """Make the given resume the active one for the current user."""
+    resume = database.get_resume_by_id(resume_id)
+    if not resume or str(resume["user_id"]) != user_id:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    database.set_active_resume(user_id, resume_id)
+    return database.get_resume_by_id(resume_id)
+
+
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
@@ -110,13 +137,39 @@ async def list_jobs(
     return job_service.list_jobs(limit=limit)
 
 
+_SCRAPE_CONFIG_FIELDS = (
+    "search_term",
+    "location",
+    "results_wanted",
+    "hours_old",
+    "distance",
+    "is_remote",
+    "job_type",
+    "experience_level",
+    "blocked_companies",
+    "min_fit_score",
+    "qualify_batch_size",
+    "sheet_tab_name",
+)
+
+
+@router.get("/config/scrape", response_model=ScrapeConfig)
+async def get_scrape_config(user_id: str = Depends(get_current_user_id)) -> dict:
+    """Return current (non-secret) scrape + qualification settings."""
+    from app.config import settings
+
+    return {f: getattr(settings, f) for f in _SCRAPE_CONFIG_FIELDS}
+
+
 @router.post("/jobs/scrape", status_code=202)
 async def scrape_jobs(
     background_tasks: BackgroundTasks,
+    config: ScrapeConfig | None = None,
     user_id: str = Depends(get_current_user_id),
 ) -> dict:
-    """Kick off a bulk LinkedIn scrape using config search params. Runs in the background."""
-    background_tasks.add_task(job_service.run_scrape, user_id)
+    """Kick off a bulk LinkedIn scrape. Optionally override config search params for this run."""
+    overrides = config.model_dump() if config else None
+    background_tasks.add_task(job_service.run_scrape, user_id, overrides)
     return {"status": "started", "message": "Scrape running in background"}
 
 
