@@ -18,7 +18,7 @@ on:
       scraper:
         description: "Which scraper to run"
         required: false
-        default: "linkedin"
+        default: "hiringcafe"
         type: choice
         options:
           - linkedin
