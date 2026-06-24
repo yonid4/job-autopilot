@@ -15,3 +15,6 @@ class Job(BaseModel):
     date_submitted: Optional[datetime] = None
     link: Optional[str] = None
     job_level: Optional[str] = None
+    # Source-specific id (e.g. hiring.cafe objectID) used to lazily fetch the
+    # full description after filtering. Not written to the sheet.
+    source_id: Optional[str] = None

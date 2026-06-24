@@ -77,12 +77,23 @@ def main() -> None:
     print(f"run_scrape() returned {len(jobs)} jobs and {len(errors)} error(s)")
     print("=" * 70)
 
-    for i, job in enumerate(jobs, 1):
+    # run_scrape() now returns lightweight inline descriptions (requirements_summary).
+    # Full descriptions are fetched post-filter via enrich_descriptions() — in main.py
+    # that runs only on jobs surviving dedup/block. Simulate it here on a small subset
+    # so the test stays fast, and show the inline -> full character growth.
+    sample = jobs[:10]
+    pre_lens = [len(j.description) if j.description else 0 for j in sample]
+    errors.extend(hiringcafe_service.enrich_descriptions(sample))
+
+    for i, (job, pre_len) in enumerate(zip(sample, pre_lens), 1):
+        post_len = len(job.description) if job.description else 0
         print(f"\n[{i}] {job.role}  @  {job.company}")
         print(f"    salary: {job.salary}")
         print(f"    link:   {job.link}")
-        desc_len = len(job.description) if job.description else 0
-        print(f"    description chars: {desc_len}")
+        print(f"    description chars: {pre_len} (inline) -> {post_len} (full)")
+
+    if len(jobs) > len(sample):
+        print(f"\n... plus {len(jobs) - len(sample)} more jobs returned (not enriched in this test)")
 
     if errors:
         print("\nERRORS:")

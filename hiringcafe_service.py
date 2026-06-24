@@ -33,7 +33,6 @@ _USER_AGENT = (
 
 _PAGE_SIZE = 40             # hiring.cafe returns 40 hits/page (pageProps.ssrPageSize)
 _MAX_PAGES = 25            # safety cap on pagination
-_FULL_DESCRIPTION_CAP = 25  # hybrid: fetch the full per-job description for at most N jobs
 _DESCRIPTION_MAX_CHARS = 10000
 _DEFAULT_RADIUS_MILES = 50  # matches hiring.cafe's own defaultRadius
 
@@ -177,7 +176,7 @@ def _fetch_full_description(session: requests.Session, object_id: str | None) ->
         return None
 
 
-def _hit_to_job(session: requests.Session, hit: dict, fetch_full: bool) -> Job:
+def _hit_to_job(hit: dict) -> Job:
     job_info = hit.get("job_information") or {}
     v5 = hit.get("v5_processed_job_data") or {}
     company_data = hit.get("enriched_company_data") or {}
@@ -187,14 +186,10 @@ def _hit_to_job(session: requests.Session, hit: dict, fetch_full: bool) -> Job:
     link = hit.get("apply_url") or hit.get("hc_apply_url") or None
     salary = _format_salary(v5)
 
-    # Hybrid description: the listing has no full description, so fall back to the
-    # inline requirements_summary and only pay for a full per-job fetch on a capped
-    # number of jobs (decided by the caller).
-    description = None
-    if fetch_full:
-        description = _strip_html(_fetch_full_description(session, hit.get("objectID")))
-    if not description:
-        description = v5.get("requirements_summary") or None
+    # The listing carries no full description — seed it with the lightweight
+    # inline requirements_summary and keep the objectID so enrich_descriptions()
+    # can fetch the full text later, only for jobs that survive filtering.
+    description = v5.get("requirements_summary") or None
 
     return Job(
         company=company,
@@ -202,7 +197,31 @@ def _hit_to_job(session: requests.Session, hit: dict, fetch_full: bool) -> Job:
         description=description[:_DESCRIPTION_MAX_CHARS] if description else None,
         salary=salary,
         link=link,
+        source_id=hit.get("objectID"),
     )
+
+
+def enrich_descriptions(jobs: list[Job]) -> list[str]:
+    """Fetch and attach full descriptions to the given jobs, in place.
+
+    Call this AFTER dedup/block filtering so a full-description request is only
+    made for jobs that are actually kept. Each job's existing (requirements_summary)
+    description is preserved if its fetch fails. Returns a list of error strings.
+    """
+    errors: list[str] = []
+    targets = [j for j in jobs if j.source_id]
+    if not targets:
+        return errors
+
+    session = _session()
+    for job in targets:
+        try:
+            full = _strip_html(_fetch_full_description(session, job.source_id))
+            if full:
+                job.description = full[:_DESCRIPTION_MAX_CHARS]
+        except Exception as e:
+            errors.append(f"hiring.cafe: description fetch failed for {job.source_id}: {e}")
+    return errors
 
 
 def run_scrape() -> tuple[list[Job], list[str]]:
@@ -250,9 +269,9 @@ def run_scrape() -> tuple[list[Job], list[str]]:
         return [], errors
 
     jobs: list[Job] = []
-    for index, hit in enumerate(hits):
+    for hit in hits:
         try:
-            jobs.append(_hit_to_job(session, hit, fetch_full=index < _FULL_DESCRIPTION_CAP))
+            jobs.append(_hit_to_job(hit))
         except Exception as e:
             errors.append(f"Row parse error: {e}")
 
