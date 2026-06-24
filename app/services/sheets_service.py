@@ -8,6 +8,8 @@ from googleapiclient.discovery import build
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 _LINK_COLUMN = "E"
 _LINK_COLUMN_INDEX = 4
+_SCORE_COLUMN_INDEX = 9   # column J (numeric fit score) — sort key
+_LAST_COLUMN_INDEX = 10   # columns A:J are written by append_jobs
 _TEMPLATE_SPREADSHEET_ID = "1nq5tb-i-zVW7ZBCcT3GLHhX8smXZALLcC_kScNswNAQ"
 
 
@@ -58,6 +60,39 @@ def _ensure_tab_exists(service) -> None:
     ).execute()
 
 
+def _get_sheet_id(service) -> int:
+    s = _settings()
+    spreadsheet = service.get(spreadsheetId=s.smart_google_sheet_id).execute()
+    for sh in spreadsheet["sheets"]:
+        if sh["properties"]["title"] == s.sheet_tab_name:
+            return sh["properties"]["sheetId"]
+    raise ValueError(f"Sheet tab {s.sheet_tab_name!r} not found")
+
+
+def _sort_by_score_desc(service, last_row: int) -> None:
+    """Sort data rows (row 2..last_row) by column J (score) descending (Z→A)."""
+    if last_row < 2:
+        return
+    s = _settings()
+    sheet_id = _get_sheet_id(service)
+    service.batchUpdate(
+        spreadsheetId=s.smart_google_sheet_id,
+        body={"requests": [{"sortRange": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 1,            # skip header row
+                "endRowIndex": last_row,       # exclusive end == 1-based last data row
+                "startColumnIndex": 0,
+                "endColumnIndex": _LAST_COLUMN_INDEX,
+            },
+            "sortSpecs": [{
+                "dimensionIndex": _SCORE_COLUMN_INDEX,
+                "sortOrder": "DESCENDING",
+            }],
+        }}]},
+    ).execute()
+
+
 def get_existing_links() -> set[str]:
     s = _settings()
     service = _get_service()
@@ -93,7 +128,7 @@ def append_jobs(jobs: list[dict]) -> None:
 
     start_row = _get_first_empty_row(service)
     end_row = start_row + len(jobs) - 1
-    range_ = f"{s.sheet_tab_name}!A{start_row}:I{end_row}"
+    range_ = f"{s.sheet_tab_name}!A{start_row}:J{end_row}"
 
     def _notes(job: dict) -> str:
         parts = []
@@ -115,7 +150,8 @@ def append_jobs(jobs: list[dict]) -> None:
             _notes(job),
             "N/A",
             job.get("salary") or "",
-            "",
+            "",                                          # I: Date Submitted (left blank)
+            job["score"] if job.get("score") is not None else "",  # J: numeric score (sort key)
         ]
         for job in jobs
     ]
@@ -126,3 +162,7 @@ def append_jobs(jobs: list[dict]) -> None:
         valueInputOption="USER_ENTERED",
         body={"values": rows},
     ).execute()
+
+    print("[sheets] sorting rows by column J (score, Z→A)...")
+    _sort_by_score_desc(service, end_row)
+    print("[sheets] sort done")
