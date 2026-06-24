@@ -1,14 +1,35 @@
 # Standard library
 import os
+from typing import Callable
 
 # Local
+import hiringcafe_service
 import linkedin_service
 import sheets
 from config import Config as config
+from job_model import Job
 from qualifiar import filtered_jobs, GeminiOverloadError
 from resume_processor import load_resume, process_resume, RESUME_JSON_PATH
 
 _RESUME_PDF_PATH = os.path.join(os.path.dirname(__file__), "resume.pdf")
+
+# Selectable scrapers. Each exposes the same run_scrape() contract.
+ScrapeFn = Callable[[], tuple[list[Job], list[str]]]
+_SCRAPERS: dict[str, ScrapeFn] = {
+    "linkedin": linkedin_service.run_scrape,
+    "hiringcafe": hiringcafe_service.run_scrape,
+}
+
+
+def _select_scraper() -> tuple[str, ScrapeFn] | tuple[None, None]:
+    """Resolve which scraper to run.
+
+    Prefers the SCRAPER env var (passed from the GitHub workflow), then
+    config.SCRAPER, then defaults to "linkedin". Returns (name, run_scrape) or
+    (None, None) if the requested scraper is unknown.
+    """
+    name = (os.getenv("SCRAPER") or getattr(config, "SCRAPER", "") or "linkedin").strip().lower()
+    return (name, _SCRAPERS[name]) if name in _SCRAPERS else (None, None)
 
 
 def _write_fallback_summary(prompts: list[str]) -> None:
@@ -52,15 +73,21 @@ def main() -> None:
         resume = process_resume(_RESUME_PDF_PATH)
         print("Resume processed and saved.")
 
-    print(f"Scraping: {config.SEARCH_TERM} in {config.LOCATION}\n")
+    scraper_name, scrape_fn = _select_scraper()
+    if scrape_fn is None:
+        print(f"Unknown SCRAPER {os.getenv('SCRAPER') or getattr(config, 'SCRAPER', None)!r}. "
+              f"Valid options: {', '.join(_SCRAPERS)}.")
+        return
 
-    jobs, errors = linkedin_service.run_scrape()
+    print(f"Scraping with '{scraper_name}': {config.SEARCH_TERM} in {config.LOCATION}\n")
+
+    jobs, errors = scrape_fn()
 
     for err in errors:
         print(f"[error] {err}")
 
     if not jobs:
-        print("No jobs returned from linkedin service.")
+        print(f"No jobs returned from {scraper_name} service.")
         return
 
     existing_links = sheets.get_existing_links()

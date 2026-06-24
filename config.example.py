@@ -7,6 +7,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
+    # --- Scraper selection ---
+    # Which scraper main.py runs: "linkedin" or "hiringcafe".
+    # Overridable via the SCRAPER env var (passed from the GitHub workflow).
+    SCRAPER = os.getenv("SCRAPER", "linkedin")
+
     # --- Search ---
     SEARCH_TERM = "software engineer"
     LOCATION = "San Francisco, CA"
