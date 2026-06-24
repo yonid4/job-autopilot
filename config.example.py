@@ -13,7 +13,7 @@ class Config:
     SCRAPER = os.getenv("SCRAPER", "linkedin")
 
     # --- Search ---
-    SEARCH_TERM = "software engineer"
+    SEARCH_TERM = "Software Development"
     LOCATION = "San Francisco, CA"
     RESULTS_WANTED = 20                 # max jobs to add per run
     HOURS_OLD = 2                       # only jobs posted in the last N hours (None = no limit)
