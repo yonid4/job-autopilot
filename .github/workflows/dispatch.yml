@@ -11,7 +11,7 @@ on:
         description: "Only fetch jobs posted in the last N hours"
         required: false
         default: "12"
-      RESULTS_WANTED:
+      results_wanted:
         description: max jobs to add per run
         required: false
         default: 150
