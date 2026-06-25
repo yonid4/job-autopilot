@@ -47,6 +47,7 @@ jobs:
       - name: Write config.py
         env:
           HOURS_OLD: ${{ github.event.inputs.hours_old }}
+          RESULTS_WANTED: ${{ github.event.inputs.results_wanted }}
           SHEET_NAME: ${{ github.event.inputs.sheet_name }}
         run: |
           python - <<'EOF'
@@ -54,6 +55,8 @@ jobs:
           from datetime import datetime
           from zoneinfo import ZoneInfo
           hours_old = int(os.environ.get("HOURS_OLD") or 12)
+          # Use the workflow input when provided; fall back to the config default otherwise.
+          results_wanted = int(os.environ.get("RESULTS_WANTED") or 500)
           # Default the sheet tab to today's date in Pacific time, e.g. "Jun 24".
           today_pst = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%b %-d")
           sheet_name = os.environ.get("SHEET_NAME") or today_pst
@@ -64,7 +67,7 @@ jobs:
               class Config:
                   SEARCH_TERM = "Software Engineer"
                   LOCATION = "Mountain View, CA"
-                  RESULTS_WANTED = 500
+                  RESULTS_WANTED = {results_wanted}
                   HOURS_OLD = {hours_old}
                   DISTANCE = 50
                   SITE_NAMES = ["linkedin", "indeed", "glassdoor", "zip_recruiter"]
