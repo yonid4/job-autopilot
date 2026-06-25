@@ -121,12 +121,17 @@ def main() -> None:
     qualified_jobs = []
     fallback_prompts: list[str] = []
     n = len(new_jobs)
+    total_batches = (n + batch_size - 1) // batch_size
+    print(f"\n[gemini] Qualifying {n} job(s) via {total_batches} request(s) "
+          f"(batch size {batch_size})...")
     for i in range(0, n, batch_size):
         batch = new_jobs[i:min(i + batch_size, n)]
+        batch_num = i // batch_size + 1
+        print(f"[gemini] Sending request {batch_num}/{total_batches} "
+              f"({len(batch)} job(s))...")
         try:
             qualified_jobs.extend(filtered_jobs(batch, resume))
         except GeminiOverloadError as e:
-            batch_num = i // batch_size + 1
             print(f"[gemini] 503 overload on batch {batch_num} — saving fallback prompt")
             fallback_prompts.append(e.prompt)
 
