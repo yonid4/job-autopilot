@@ -13,7 +13,7 @@ on:
         default: "12"
       results_wanted:
         description: max jobs to add per run
-        required: true
+        required: false
         default: 150
       sheet_name:
         description: "Sheet tab to write jobs into (created if it doesn't exist; blank = today's Pacific date, e.g. 'Jun 24')"
