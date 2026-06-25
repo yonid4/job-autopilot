@@ -11,6 +11,10 @@ on:
         description: "Only fetch jobs posted in the last N hours"
         required: false
         default: "12"
+      results_wanted:
+        description: max jobs to add per run
+        required: true
+        default: 150
       sheet_name:
         description: "Sheet tab to write jobs into (created if it doesn't exist; blank = today's Pacific date, e.g. 'Jun 24')"
         required: false
