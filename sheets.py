@@ -112,6 +112,7 @@ def append_jobs(jobs: list[Job]) -> None:
     Column order (must match sheet exactly):
     A: Company Name | B: Application Status | C: Title | D: Description
     E: Link to Job Req | F: Notes | G: Rejection Reason | H: Salary | I: Date Submitted
+    J: Score
     """
     if not jobs:
         return
@@ -119,7 +120,7 @@ def append_jobs(jobs: list[Job]) -> None:
     service = _get_service()
     start_row = _get_first_empty_row(service)
     end_row = start_row + len(jobs) - 1
-    range_ = f"{config.SHEET_TAB_NAME}!A{start_row}:I{end_row}"
+    range_ = f"{config.SHEET_TAB_NAME}!A{start_row}:J{end_row}"
 
     rows = [
         [
@@ -128,10 +129,11 @@ def append_jobs(jobs: list[Job]) -> None:
             job.role or "",              # C: Title
             job.description or "",       # D: Description
             job.link or "",              # E: Link to Job Req
-            "",                          # F: Notes
+            job.notes or "",             # F: Notes
             "N/A",                       # G: Rejection Reason
             job.salary or "",            # H: Salary
             "",                          # I: Date Submitted
+            job.score if job.score is not None else "",  # J: Score
         ]
         for job in jobs
     ]
