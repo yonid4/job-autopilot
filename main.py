@@ -147,6 +147,11 @@ def main() -> None:
         sheets.append_jobs(new_jobs)
         print(f"Done: {len(new_jobs)} new jobs added, {duplicates} duplicates skipped.")
 
+    # Sort the sheet by Score (column J) descending, Z-to-A. Runs after everything
+    # that could be added was added — even if Gemini 503'd on some batches.
+    print("[sheets] sorting by score (column J), highest first...")
+    sheets.sort_by_score()
+
     if fallback_prompts:
         print(f"Gemini was overloaded for {len(fallback_prompts)} batch(es). Fallback prompts written to the workflow run summary.")
 

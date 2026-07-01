@@ -20,6 +20,9 @@ _CREDENTIALS_PATH = os.environ["GOOGLE_CREDENTIALS_PATH"]
 _LINK_COLUMN = "E"
 _LINK_COLUMN_INDEX = 4
 
+# Column J (index 9) — "Score"
+_SCORE_COLUMN_INDEX = 9
+
 
 def _get_service():
     creds = Credentials.from_service_account_file(_CREDENTIALS_PATH, scopes=_SCOPES)
@@ -87,6 +90,15 @@ def get_existing_links() -> set[str]:
     return {row[0] for row in rows[1:] if row and row[0]}
 
 
+def _get_sheet_id(service) -> int:
+    """Return the numeric sheetId for config.SHEET_TAB_NAME."""
+    spreadsheet = service.get(spreadsheetId=_SHEET_ID).execute()
+    for s in spreadsheet["sheets"]:
+        if s["properties"]["title"] == config.SHEET_TAB_NAME:
+            return s["properties"]["sheetId"]
+    raise RuntimeError(f"Sheet tab {config.SHEET_TAB_NAME!r} not found")
+
+
 def _get_first_empty_row(service) -> int:
     """
     Find the first row where column A (Company Name) is blank.
@@ -143,4 +155,36 @@ def append_jobs(jobs: list[Job]) -> None:
         range=range_,
         valueInputOption="USER_ENTERED",
         body={"values": rows},
+    ).execute()
+
+
+def sort_by_score() -> None:
+    """Sort the data rows by Score (column J) descending — Z-to-A, highest first.
+
+    Leaves the header row and any trailing pre-formatted empty rows untouched.
+    Safe to call even when no new rows were added this run (it no-ops on an
+    empty sheet).
+    """
+    service = _get_service()
+    first_empty_row = _get_first_empty_row(service)
+    # Data occupies 1-based rows 2..first_empty_row-1. Nothing to sort if empty.
+    if first_empty_row <= 2:
+        return
+
+    sheet_id = _get_sheet_id(service)
+    service.batchUpdate(
+        spreadsheetId=_SHEET_ID,
+        body={"requests": [{"sortRange": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 1,                  # skip header (row 1)
+                "endRowIndex": first_empty_row - 1,  # exclusive, last filled row
+                "startColumnIndex": 0,               # column A
+                "endColumnIndex": 10,                # through column J
+            },
+            "sortSpecs": [{
+                "dimensionIndex": _SCORE_COLUMN_INDEX,
+                "sortOrder": "DESCENDING",
+            }],
+        }}]},
     ).execute()
