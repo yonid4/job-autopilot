@@ -23,6 +23,12 @@ _LINK_COLUMN_INDEX = 4
 # Column J (index 9) — "Score"
 _SCORE_COLUMN_INDEX = 9
 
+# Conditional formatting: highlight rows with Score >= threshold in
+# Google Sheets' "light green 1" swatch (#b7e1cd).
+_SCORE_HIGHLIGHT_THRESHOLD = 95
+_LIGHT_GREEN_1 = {"red": 0.717647, "green": 0.882353, "blue": 0.803922}
+_SCORE_HIGHLIGHT_FORMULA = f"=$J2>={_SCORE_HIGHLIGHT_THRESHOLD}"
+
 
 def _get_service():
     creds = Credentials.from_service_account_file(_CREDENTIALS_PATH, scopes=_SCOPES)
@@ -156,6 +162,63 @@ def append_jobs(jobs: list[Job]) -> None:
         valueInputOption="USER_ENTERED",
         body={"values": rows},
     ).execute()
+
+
+def ensure_score_highlight_rule() -> None:
+    """Ensure a conditional formatting rule exists that colors entire data
+    rows light green 1 when Score (column J) >= 95.
+
+    Idempotent — checks for an existing matching rule before adding one, so
+    it's safe to call on every run. The rule uses an open-ended row range,
+    so it keeps applying to new rows added in future runs without needing
+    to be re-created.
+    """
+    service = _get_service()
+    sheet_id = _get_sheet_id(service)
+
+    spreadsheet = service.get(
+        spreadsheetId=_SHEET_ID,
+        fields="sheets(properties(sheetId),conditionalFormats)",
+    ).execute()
+
+    for sheet in spreadsheet["sheets"]:
+        if sheet["properties"]["sheetId"] != sheet_id:
+            continue
+        for rule in sheet.get("conditionalFormats", []):
+            condition = rule.get("booleanRule", {}).get("condition", {})
+            values = condition.get("values", [])
+            if (
+                condition.get("type") == "CUSTOM_FORMULA"
+                and values
+                and values[0].get("userEnteredValue") == _SCORE_HIGHLIGHT_FORMULA
+            ):
+                print("[sheets] score highlight rule already exists, skipping")
+                return
+
+    service.batchUpdate(
+        spreadsheetId=_SHEET_ID,
+        body={"requests": [{
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{
+                        "sheetId": sheet_id,
+                        "startRowIndex": 1,   # skip header
+                        "startColumnIndex": 0,
+                        "endColumnIndex": 10,  # through column J
+                    }],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "CUSTOM_FORMULA",
+                            "values": [{"userEnteredValue": _SCORE_HIGHLIGHT_FORMULA}],
+                        },
+                        "format": {"backgroundColor": _LIGHT_GREEN_1},
+                    },
+                },
+                "index": 0,
+            },
+        }]},
+    ).execute()
+    print("[sheets] added score highlight conditional formatting rule")
 
 
 def sort_by_score() -> None:

@@ -152,6 +152,10 @@ def main() -> None:
     print("[sheets] sorting by score (column J), highest first...")
     sheets.sort_by_score()
 
+    # Ensure rows scoring >= 95 are highlighted light green 1. Idempotent, so
+    # safe to run every time.
+    sheets.ensure_score_highlight_rule()
+
     if fallback_prompts:
         print(f"Gemini was overloaded for {len(fallback_prompts)} batch(es). Fallback prompts written to the workflow run summary.")
 
