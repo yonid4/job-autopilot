@@ -1,6 +1,6 @@
 # Job Autopilot
 
-Automatically scrapes job postings, filters them against your resume using Gemini AI, and writes qualifying jobs to a Google Sheet for tracking.
+Automatically scrapes job postings, filters them against your resume using Gemini AI, and writes qualifying jobs to a Google Sheet for tracking. A second pass reads your inbox and keeps the sheet up to date as replies come in — marking rejections, assessments, interviews and offers, and pinging Discord about the good news.
 
 ## How It Works
 
@@ -8,6 +8,16 @@ Automatically scrapes job postings, filters them against your resume using Gemin
 2. **Parses** your resume PDF using Gemini to extract structured data (cached as `resume.json`)
 3. **Qualifies** each job by scoring resume-to-job fit with Gemini AI — only jobs scoring ≥ 80/100 pass
 4. **Writes** new qualifying jobs to your Google Sheet, skipping duplicates
+
+And separately, on its own schedule (`check_email.py`):
+
+5. **Reads** recent mail from your Gmail inbox
+6. **Classifies** each message — rejection, online assessment, interview, offer, acknowledgement, or noise
+7. **Matches** it to the application it's about, across every tab in your sheet
+8. **Marks** the row's Application Status and records what the email said
+9. **Notifies** you on Discord when the news is good
+
+See [Email status tracking](#email-status-tracking) below.
 
 ## Prerequisites
 
@@ -76,9 +86,9 @@ Make a copy of the [Google Sheet template](https://docs.google.com/spreadsheets/
 
 The sheet has a tab named `"Tracking Template"` with these columns:
 
-| A | B | C | D | E | F | G | H | I |
-|---|---|---|---|---|---|---|---|---|
-| Company Name | Application Status | Title | Description | Salary | Date Submitted | Link to Job Req | Rejection Reason | Notes |
+| A | B | C | D | E | F | G | H | I | J |
+|---|---|---|---|---|---|---|---|---|---|
+| Company Name | Application Status | Title | Description | Link to Job Req | Notes | Rejection Reason | Salary | Date Submitted | Score |
 
 Row 1 is the header row. The script writes into the first blank row in column A, preserving any existing formatting.
 
@@ -136,6 +146,99 @@ SCRAPER=hiringcafe python3 main.py   # override the scraper for this run
 `main.py` runs the scraper named by `SCRAPER` (the `SCRAPER` env var wins over `config.py`).
 Output will show scraped jobs, any errors, and a summary of how many were added vs. skipped as duplicates.
 
+## Email status tracking
+
+`check_email.py` reads your inbox, works out what each recruiting email is saying, finds the
+application it belongs to, and updates the sheet. Positive news also goes to Discord.
+
+### What it writes
+
+| Email says | Application Status becomes | Where the detail goes |
+|---|---|---|
+| Rejection | `Rejected` | Rejection Reason (column G) |
+| Online assessment / coding challenge | `Online Assessment` | Notes (column F) |
+| Interview invite or scheduling | `Interviewing` | Notes (column F) |
+| Offer | `Offer` | Notes (column F) |
+| "We received your application" | `Applied` | Notes (column F) |
+| Job alerts, newsletters, anything else | unchanged | — |
+
+Each note is stamped with the email's date, e.g.
+`[2026-09-22] Online assessment: Next step — your HackerRank assessment`. The existing cell
+contents are kept underneath, so the Gemini fit analysis already in Notes isn't lost.
+
+A row only ever moves **forward**: `Have Not Applied` → `Applied` → `Online Assessment` →
+`Interviewing` → `Offer`, with `Rejected` landing from anywhere. A late auto-reply can't knock a
+row back from `Interviewing`. Column I (Date Submitted) is never touched — it records when *you*
+applied, not when they replied.
+
+Because the scraper writes a new tab per run, the checker scans **every** tracking tab in the
+spreadsheet (any tab whose first header cell is "Company Name"), not just today's.
+
+### How it decides
+
+A weighted phrase matcher handles most recruiting mail on its own — the wording is formulaic, and
+it costs nothing. Only genuinely unclear mail goes to Gemini, batched, with a shortlist of your
+open applications so it can pick the role as well as the category. Email that matches none of your
+applications and reads like nothing in particular never reaches Gemini at all.
+
+Gemini is optional here. With no key set, or when it's overloaded, the rule verdict stands and
+anything below `EMAIL_MIN_CONFIDENCE` (default 0.6) is reported but not acted on.
+
+Work already done is tracked by a Gmail label (`Job Autopilot/Processed`, created on first run),
+so re-running never double-writes a row or repeats a notification.
+
+### Setup
+
+**1. Gmail access.** The service account used for Sheets can't read a personal mailbox, so this
+uses your own OAuth credentials.
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), enable the **Gmail API** on the
+   same project as your Sheets credentials
+2. **APIs & Services → Credentials → Create Credentials → OAuth client ID → Desktop app**
+3. Download the JSON and save it as `gmail_client_secret.json` in the project root
+4. Authorize once:
+
+```bash
+python3 gmail_service.py
+```
+
+That opens a browser, saves `gmail_token.json` locally, and prints the three values to paste into
+GitHub Actions secrets. The scope requested is `gmail.modify` — read messages and change their
+labels. It cannot send or delete mail.
+
+**2. Discord notifications.** In your Discord server, open the notifications channel →
+**Edit Channel → Integrations → Webhooks → New Webhook → Copy Webhook URL**, and set it as
+`DISCORD_WEBHOOK_URL`. Optionally set `DISCORD_MENTION` to `<@your-user-id>` so pings reach your
+phone. With no webhook set, the checker still updates the sheet and just skips notifying.
+
+**3. Check the status strings.** `STATUS_APPLIED`, `STATUS_ASSESSMENT`, `STATUS_INTERVIEW`,
+`STATUS_OFFER` and `STATUS_REJECTED` in `config.py` must match your sheet's Application Status
+dropdown exactly, or Sheets will flag the cells as invalid entries.
+
+### Running
+
+```bash
+EMAIL_DRY_RUN=1 python3 check_email.py   # print the plan, write nothing — do this first
+python3 check_email.py                   # for real
+```
+
+A dry run leaves Gmail untouched too, so you can repeat it until the plan looks right.
+
+To run it on a schedule, the `.github/workflows/check_email.yml` workflow must live on the
+repo's **default branch** — GitHub only schedules workflows from there — while it checks the code
+out from `linkedin-hiringcafe`. It needs these secrets: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`,
+`GMAIL_REFRESH_TOKEN`, `DISCORD_WEBHOOK_URL`, plus the `SPREAD_SHEET_ID`, `GOOGLE_SHEETS_CREDS`
+and `GEMINI_API_KEY(S)` the scraper already uses.
+
+### Tests
+
+```bash
+python3 test_email_tracker.py
+```
+
+Runs offline against fixtures — no Gmail, Sheets, Gemini or credentials needed. Covers the
+classifier, the email-to-row matcher and the status ladder.
+
 ## Project Structure
 
 ```
@@ -146,11 +249,21 @@ job-autopilot/
 ├── qualifiar.py         # Gemini AI resume-to-job scoring
 ├── resume_processor.py  # PDF parsing and resume caching
 ├── sheets.py            # Google Sheets read/write
-├── job_model.py         # Job data model
+├── job_model.py         # Job and tracking-row data models
+├── check_email.py       # Entry point — inbox -> sheet status + Discord
+├── gmail_service.py     # Gmail OAuth, fetching, processed-label bookkeeping
+├── email_classifier.py  # Phrase rules, with Gemini for the unclear ones
+├── email_model.py       # Email and verdict data models
+├── application_matcher.py # Works out which sheet row an email is about
+├── application_status.py  # Status names and the forward-only status ladder
+├── discord_notifier.py  # Webhook notifications for good news
+├── gemini_client.py     # Shared Gemini JSON calls with key rotation
+├── test_email_tracker.py # Offline tests for the email pipeline
 ├── config.py            # All configuration
 ├── requirements.txt
 ├── .env                 # Your secrets (not committed)
 ├── resume.pdf           # Your resume (not committed)
+├── gmail_token.json     # Gmail OAuth token (not committed)
 ├── credentials/         # Google service account key (not committed)
 └── resume.json          # Cached parsed resume (not committed)
 ```

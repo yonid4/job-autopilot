@@ -1,0 +1,96 @@
+name: Check Application Email
+
+on:
+  schedule:
+    # Every 3 hours. Cron is UTC; the processed-label bookkeeping means a
+    # missed run is caught up by the next one rather than lost.
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Code branch to run"
+        required: false
+        default: "linkedin-hiringcafe"
+      lookback_hours:
+        description: "How far back to read the inbox"
+        required: false
+        default: "48"
+      dry_run:
+        description: "Print the plan without writing to the sheet or Discord"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  check-email:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || 'linkedin-hiringcafe' }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write config.py
+        run: |
+          python - <<'EOF'
+          import textwrap
+          snippet = textwrap.dedent("""
+              import os
+              from dotenv import load_dotenv
+              load_dotenv()
+              class Config:
+                  SHEET_TAB_NAME = "Tracking Template"
+                  STATUS_ON_SCRAPE = "Have Not Applied"
+                  STATUS_APPLIED = "Applied"
+                  STATUS_ASSESSMENT = "Online Assessment"
+                  STATUS_INTERVIEW = "Interviewing"
+                  STATUS_OFFER = "Offer"
+                  STATUS_REJECTED = "Rejected"
+                  EMAIL_LOOKBACK_HOURS = 48
+                  EMAIL_MAX_RESULTS = 150
+                  EMAIL_PROCESSED_LABEL = "Job Autopilot/Processed"
+                  EMAIL_MIN_CONFIDENCE = 0.6
+                  DISCORD_NOTIFY_CATEGORIES = ["assessment", "interview", "offer"]
+                  GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+                  _gemini_keys_raw = os.getenv("GEMINI_API_KEYS")
+                  GEMINI_API_KEYS: list[str] = (
+                      [k.strip() for k in _gemini_keys_raw.split(",") if k.strip()]
+                      if _gemini_keys_raw
+                      else ([GEMINI_API_KEY] if GEMINI_API_KEY else [])
+                  )
+                  GEMINI_PRIMARY_MODEL = os.getenv("GEMINI_PRIMARY_MODEL", "gemini-2.5-flash")
+          """).strip()
+          with open("config.py", "w") as f:
+              f.write(snippet + "\n")
+          EOF
+
+      - name: Write Google Sheets credentials
+        env:
+          GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
+        run: echo "$GOOGLE_SHEETS_CREDS" > credentials.json
+
+      - name: Check email
+        env:
+          GOOGLE_SHEET_ID: ${{ secrets.SPREAD_SHEET_ID }}
+          GOOGLE_CREDENTIALS_PATH: credentials.json
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_MENTION: ${{ vars.DISCORD_MENTION }}
+          EMAIL_LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours }}
+          EMAIL_DRY_RUN: ${{ github.event.inputs.dry_run }}
+          TIMEZONE: America/Los_Angeles
+        run: python check_email.py

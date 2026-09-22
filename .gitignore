@@ -14,3 +14,6 @@ __pycache__/
 .python-version
 
 config.py
+
+gmail_token.json
+gmail_client_secret.json

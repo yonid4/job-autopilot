@@ -47,3 +47,35 @@ class Config:
 
     # --- GEMINI ---
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    # Optional pool of keys, rotated when one hits its quota.
+    _gemini_keys_raw = os.getenv("GEMINI_API_KEYS")
+    GEMINI_API_KEYS: list[str] = (
+        [k.strip() for k in _gemini_keys_raw.split(",") if k.strip()]
+        if _gemini_keys_raw
+        else ([GEMINI_API_KEY] if GEMINI_API_KEY else [])
+    )
+    GEMINI_PRIMARY_MODEL = os.getenv("GEMINI_PRIMARY_MODEL", "gemini-2.5-flash")
+
+    # --- Email status tracking (check_email.py) ---
+    # How far back to read the inbox. Processed mail is labelled in Gmail, so a
+    # wide window costs nothing and covers skipped runs.
+    EMAIL_LOOKBACK_HOURS = 48
+    EMAIL_MAX_RESULTS = 150
+    # Gmail label applied to messages already triaged. Created on first run.
+    EMAIL_PROCESSED_LABEL = "Job Autopilot/Processed"
+    # Verdicts below this confidence are reported but never written or sent.
+    EMAIL_MIN_CONFIDENCE = 0.6
+
+    # Status values written to the Application Status column. These must match
+    # your sheet's dropdown exactly, or Sheets will flag the cells as invalid.
+    STATUS_APPLIED = "Applied"
+    STATUS_ASSESSMENT = "Online Assessment"
+    STATUS_INTERVIEW = "Interviewing"
+    STATUS_OFFER = "Offer"
+    STATUS_REJECTED = "Rejected"
+
+    # --- Discord ---
+    # Incoming webhook for the notifications channel. Unset = no notifications.
+    DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+    # Which categories are worth a ping. Rejections stay out of it by default.
+    DISCORD_NOTIFY_CATEGORIES = ["assessment", "interview", "offer"]
