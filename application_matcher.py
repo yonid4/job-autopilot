@@ -53,6 +53,12 @@ _ROLE_STOPWORDS = frozenset({
 
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
+# Evidence needed before an email counts as plausibly about one of your
+# applications at all, and so is worth a Gemini call when the rules are unsure.
+# A company in the sender's name (4) or domain (5) clears it; a passing body
+# mention (2) does not. Below this, the email is treated as unrelated mail.
+RELATED_THRESHOLD = 4
+
 # A row needs this much evidence before we'll write to it. Calibrated so a bare
 # mention of the company in the body (2) is never enough on its own, while a
 # matching sender domain (5) or a display name plus subject (4 + 3) is.
@@ -165,11 +171,15 @@ def score_row(message: EmailMessage, row: ApplicationRow) -> int:
                 score += 2
 
     # Role wording separates several open applications at the same company.
+    # Matched as whole words: as substrings, short titles like "AI" or "QA"
+    # would hit "email" or "claim" in nearly every message.
     words = _role_words(row.role)
     if words:
-        if sum(1 for w in words if w in subject) / len(words) >= 0.5:
+        subject_words = set(subject.split())
+        body_words = set(body.split())
+        if sum(1 for w in words if w in subject_words) / len(words) >= 0.5:
             score += 2
-        if sum(1 for w in words if w in body) / len(words) >= 0.6:
+        if sum(1 for w in words if w in body_words) / len(words) >= 0.6:
             score += 1
 
     return score

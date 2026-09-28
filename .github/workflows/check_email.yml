@@ -2,9 +2,11 @@ name: Check Application Email
 
 on:
   schedule:
-    # Every 3 hours. Cron is UTC; the processed-label bookkeeping means a
-    # missed run is caught up by the next one rather than lost.
-    - cron: "0 */3 * * *"
+    # Once a day at 15:00 UTC — 8am Pacific in summer, 7am in winter (cron is
+    # UTC and doesn't follow daylight saving). The 48h lookback plus the
+    # processed-label bookkeeping means a missed or delayed run is caught up by
+    # the next one rather than lost.
+    - cron: "0 15 * * *"
   workflow_dispatch:
     inputs:
       branch:

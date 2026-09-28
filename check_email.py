@@ -173,14 +173,17 @@ def main() -> None:
     matches: dict[str, matcher.MatchResult] = {}
     candidates_for: dict[str, list[ApplicationRow]] = {}
     needs_review: set[str] = set()
+    related: set[str] = set()
     for message in messages:
         result = matcher.best_match(message, rows)
         matches[message.id] = result
         candidates_for[message.id] = [row for _, row in matcher.rank_candidates(message, rows)]
         if result.ambiguous:
             needs_review.add(message.id)
+        if result.score >= matcher.RELATED_THRESHOLD:
+            related.add(message.id)
 
-    verdicts = classify(messages, candidates_for, needs_review)
+    verdicts = classify(messages, candidates_for, needs_review, related)
 
     print(f"\n[check_email] {len(messages)} message(s) triaged:")
     updates, notifications = plan_updates(messages, verdicts, matches)

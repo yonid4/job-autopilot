@@ -21,6 +21,7 @@ os.environ.setdefault("GOOGLE_CREDENTIALS_PATH", "offline-test")
 import application_matcher as matcher
 import application_status as status
 import check_email
+import email_classifier
 from email_classifier import RULES_CONFIDENCE_FLOOR, classify_by_rules
 from email_model import EmailCategory, EmailMessage, EmailVerdict
 from job_model import ApplicationRow
@@ -379,11 +380,54 @@ def test_planning() -> None:
           updates and len(updates[0].note_text) <= 45000, str(len(updates[0].note_text)) if updates else "")
 
 
+# --- Gemini gate ----------------------------------------------------------
+
+def test_gemini_gate() -> None:
+    print("\ngemini gate")
+
+    # Regression: "ai" inside "claim"/"email" used to count as the role "AI
+    # Engineer", so against a big sheet every promo email had a shortlist.
+    promo = email("Claim it: 20% off 5 rides",
+                  "Open the app and your discount is applied. Questions? Reply to this email.",
+                  sender="Rides <promo@rides.example>", id_="promo")
+    ai_row = ApplicationRow(row=2, tab="t", company="Acme", role="AI Engineer")
+    check("short role words don't match inside other words",
+          matcher.score_row(promo, ai_row) == 0, f"score {matcher.score_row(promo, ai_row)}")
+
+    # Capture what would be sent to Gemini instead of calling it.
+    sent: list[str] = []
+    original = email_classifier._classify_with_gemini
+    email_classifier._classify_with_gemini = lambda items: sent.extend(m.id for m, _ in items) or {}
+    try:
+        weak = ApplicationRow(row=3, tab="t", company="Globex", role="Data Engineer")
+        vague_related = email("Quick question", "Are you still interested?",
+                              sender="Globex Talent <talent@globex.com>", id_="related")
+        vague_unrelated = email("Quick question", "Are you still interested?",
+                                sender="Someone <someone@elsewhere.example>", id_="unrelated")
+        email_classifier.classify(
+            [promo, vague_related, vague_unrelated],
+            candidates_for={"promo": [ai_row], "related": [weak], "unrelated": [weak]},
+            related={"related"},
+        )
+    finally:
+        email_classifier._classify_with_gemini = original
+
+    check("unrelated junk stays away from Gemini even with a weak shortlist",
+          "promo" not in sent and "unrelated" not in sent, str(sent))
+    check("an unclear email from a company you applied to still goes to Gemini",
+          "related" in sent, str(sent))
+
+    result = matcher.best_match(vague_related, [weak])
+    check("company in the sender's name counts as related",
+          result.score >= matcher.RELATED_THRESHOLD, f"score {result.score}")
+
+
 def main() -> None:
     test_classification()
     test_matching()
     test_status_precedence()
     test_planning()
+    test_gemini_gate()
     print()
     if _failures:
         print(f"{len(_failures)} check(s) failed:")

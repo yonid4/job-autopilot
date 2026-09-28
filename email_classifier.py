@@ -318,14 +318,17 @@ def classify(
     messages: list[EmailMessage],
     candidates_for: dict[str, list[ApplicationRow]],
     needs_review: set[str] | None = None,
+    related: set[str] | None = None,
 ) -> dict[str, EmailVerdict]:
     """Classify every message, escalating only the unclear ones to Gemini.
 
     `candidates_for` maps email id to the shortlist of applications it might
     refer to; `needs_review` names emails the caller wants escalated regardless
-    of rule confidence (typically because the row match was a coin flip).
+    of rule confidence (typically because the row match was a coin flip);
+    `related` names emails with real evidence of being about an application.
     """
     needs_review = needs_review or set()
+    related = related or set()
     verdicts: dict[str, EmailVerdict] = {}
     ambiguous: list[tuple[EmailMessage, list[ApplicationRow]]] = []
 
@@ -335,10 +338,12 @@ def classify(
         shortlist = candidates_for.get(message.id, [])[:_MAX_CANDIDATES_PER_EMAIL]
         unsure_category = verdict.confidence < RULES_CONFIDENCE_FLOOR
         unsure_row = message.id in needs_review and verdict.category in ACTIONABLE_CATEGORIES
-        # Mail that names none of the open applications and reads like nothing in
+        # Mail with no real link to an application that reads like nothing in
         # particular is almost always unrelated — paying Gemini to confirm that on
-        # every run is waste, so it stays with the rule verdict.
-        worth_asking = bool(shortlist) or verdict.category in ACTIONABLE_CATEGORIES
+        # every run is waste, so it stays with the rule verdict. A non-empty
+        # shortlist isn't enough on its own: against a sheet of thousands of
+        # rows, some row always scores a point or two by coincidence.
+        worth_asking = message.id in related or verdict.category in ACTIONABLE_CATEGORIES
         if (unsure_category or unsure_row) and worth_asking:
             ambiguous.append((message, shortlist))
 
