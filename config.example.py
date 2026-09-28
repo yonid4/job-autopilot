@@ -76,6 +76,6 @@ class Config:
 
     # --- Discord ---
     # Incoming webhook for the notifications channel. Unset = no notifications.
-    DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+    DISCORD_WEBHOOK_NOTIFICATIONS_URL = os.getenv("DISCORD_WEBHOOK_NOTIFICATIONS_URL")
     # Which categories are worth a ping. Rejections stay out of it by default.
     DISCORD_NOTIFY_CATEGORIES = ["assessment", "interview", "offer"]

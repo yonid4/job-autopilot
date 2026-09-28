@@ -1,9 +1,9 @@
 """Push the good news to Discord.
 
 Posts through an incoming webhook, so no bot process and no gateway connection
-— just a URL held in DISCORD_WEBHOOK_URL. With no URL configured the module
-quietly no-ops, which keeps the rest of the pipeline usable before the channel
-exists.
+— just the #notifications channel's URL, held in DISCORD_WEBHOOK_NOTIFICATIONS_URL.
+With no URL configured the module quietly no-ops, which keeps the rest of the
+pipeline usable before the channel exists.
 """
 
 # Standard library
@@ -20,7 +20,7 @@ from job_model import ApplicationRow
 
 load_dotenv()
 
-WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
+WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_NOTIFICATIONS_URL", "").strip()
 
 # Optional "<@123...>" or "@here" prepended to the message so it actually
 # pushes to your phone instead of sitting silently in the channel.
@@ -134,7 +134,7 @@ def notify(items: list[tuple[EmailMessage, EmailVerdict, ApplicationRow | None]]
     if not items:
         return 0
     if not is_configured():
-        print(f"[discord] DISCORD_WEBHOOK_URL not set — skipping {len(items)} notification(s)")
+        print(f"[discord] DISCORD_WEBHOOK_NOTIFICATIONS_URL not set — skipping {len(items)} notification(s)")
         return 0
 
     sent = 0
