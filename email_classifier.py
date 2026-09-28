@@ -19,6 +19,7 @@ import re
 import gemini_client
 from email_model import (
     ACTIONABLE_CATEGORIES,
+    POSITIVE_CATEGORIES,
     EmailAnalysis,
     EmailCategory,
     EmailMessage,
@@ -29,6 +30,17 @@ from job_model import ApplicationRow
 # A rule verdict at or above this confidence is taken as final; below it, the
 # email is sent to Gemini for a second opinion.
 RULES_CONFIDENCE_FLOOR = 0.7
+
+# Phrase score at which a rule category counts as real evidence rather than a
+# coincidence. One decisive phrase (3), or a strong one in the subject, clears
+# it; a lone hint like "expires in" or "next steps" (1) — the stuff of every
+# promo email — does not.
+ACTIONABLE_SIGNAL_FLOOR = 3
+
+# Why an email was sent to Gemini, shown in the run log.
+REASON_UNCLEAR = "unclear category"
+REASON_WHICH_ROW = "unsure which application"
+REASON_DETAILS = "company/role for notification"
 
 # Emails per Gemini request. Small enough that one bad batch costs little.
 _GEMINI_BATCH_SIZE = 5
@@ -210,6 +222,7 @@ def classify_by_rules(message: EmailMessage) -> EmailVerdict:
         confidence=_confidence(best, second),
         summary=(message.subject or "").strip(),
         source="rules",
+        rule_score=best,
     )
 
 
@@ -255,6 +268,9 @@ RULES:
 - An assessment or interview invite that opens with "congratulations" is not an offer.
 - Set application_index to the # of the one application the email is about. Use 0 if the email
   matches none of the listed applications, or if you cannot tell which one it is.
+- Set company to the hiring company and role to the job title, exactly as the email states them.
+  Fill these in even when application_index is 0. Leave either empty if the email doesn't say —
+  never guess a title the email doesn't mention.
 - Set confidence to how certain you are of the category, from 0.0 to 1.0.
 - Keep summary to one short sentence, under 120 characters.
 - Return exactly one result per email, using the EMAIL ID given above.
@@ -310,8 +326,37 @@ def _classify_with_gemini(
                 summary=(result.summary or "").strip(),
                 source="gemini",
                 matched_row=row,
+                company=(result.company or "").strip(),
+                role=(result.role or "").strip(),
             )
     return verdicts
+
+
+def _escalation_reason(
+    message: EmailMessage,
+    verdict: EmailVerdict,
+    needs_review: set[str],
+    related: set[str],
+    unmatched: set[str],
+) -> str:
+    """Why this email deserves a Gemini call, or "" if the rules should stand.
+
+    Every path needs real evidence the email is about a job — a genuine phrase
+    signal or a company you applied to. Against a sheet of thousands of rows
+    and an inbox full of promotions, anything weaker sends junk to Gemini.
+    """
+    confident = verdict.confidence >= RULES_CONFIDENCE_FLOOR
+    signal = verdict.category in ACTIONABLE_CATEGORIES and verdict.rule_score >= ACTIONABLE_SIGNAL_FLOOR
+
+    if not confident and (message.id in related or signal):
+        return REASON_UNCLEAR
+    if confident and verdict.category in ACTIONABLE_CATEGORIES and message.id in needs_review:
+        return REASON_WHICH_ROW
+    # Good news that can't be tied to a row still gets a notification; ask for
+    # the company and role so it doesn't arrive as "Unknown company".
+    if confident and verdict.category in POSITIVE_CATEGORIES and message.id in unmatched:
+        return REASON_DETAILS
+    return ""
 
 
 def classify(
@@ -319,38 +364,45 @@ def classify(
     candidates_for: dict[str, list[ApplicationRow]],
     needs_review: set[str] | None = None,
     related: set[str] | None = None,
+    unmatched: set[str] | None = None,
 ) -> dict[str, EmailVerdict]:
     """Classify every message, escalating only the unclear ones to Gemini.
 
     `candidates_for` maps email id to the shortlist of applications it might
-    refer to; `needs_review` names emails the caller wants escalated regardless
-    of rule confidence (typically because the row match was a coin flip);
-    `related` names emails with real evidence of being about an application.
+    refer to; `needs_review` names emails whose row match was a coin flip;
+    `related` names emails with real evidence of being about an application;
+    `unmatched` names emails no row could be found for. Each verdict records in
+    `escalation` why it went to Gemini, if it did.
     """
     needs_review = needs_review or set()
     related = related or set()
+    unmatched = unmatched or set()
     verdicts: dict[str, EmailVerdict] = {}
-    ambiguous: list[tuple[EmailMessage, list[ApplicationRow]]] = []
+    escalated: list[tuple[EmailMessage, list[ApplicationRow]]] = []
 
     for message in messages:
         verdict = classify_by_rules(message)
+        verdict.escalation = _escalation_reason(message, verdict, needs_review, related, unmatched)
+        # A faint hint that isn't worth asking Gemini about isn't worth naming
+        # either: "expires in" makes a promo score as an assessment, and a log
+        # that says so reads like a false alarm. Its confidence is already below
+        # anything that gets acted on, so this only changes the label.
+        if (not verdict.escalation and verdict.category in ACTIONABLE_CATEGORIES
+                and verdict.rule_score < ACTIONABLE_SIGNAL_FLOOR):
+            verdict.category = EmailCategory.OTHER
         verdicts[message.id] = verdict
-        shortlist = candidates_for.get(message.id, [])[:_MAX_CANDIDATES_PER_EMAIL]
-        unsure_category = verdict.confidence < RULES_CONFIDENCE_FLOOR
-        unsure_row = message.id in needs_review and verdict.category in ACTIONABLE_CATEGORIES
-        # Mail with no real link to an application that reads like nothing in
-        # particular is almost always unrelated — paying Gemini to confirm that on
-        # every run is waste, so it stays with the rule verdict. A non-empty
-        # shortlist isn't enough on its own: against a sheet of thousands of
-        # rows, some row always scores a point or two by coincidence.
-        worth_asking = message.id in related or verdict.category in ACTIONABLE_CATEGORIES
-        if (unsure_category or unsure_row) and worth_asking:
-            ambiguous.append((message, shortlist))
+        if verdict.escalation:
+            shortlist = candidates_for.get(message.id, [])[:_MAX_CANDIDATES_PER_EMAIL]
+            escalated.append((message, shortlist))
 
-    if ambiguous:
-        print(f"[classifier] {len(messages) - len(ambiguous)} email(s) settled by rules, "
-              f"{len(ambiguous)} sent to Gemini")
-        verdicts.update(_classify_with_gemini(ambiguous))
+    if escalated:
+        print(f"[classifier] {len(messages) - len(escalated)} email(s) settled by rules, "
+              f"{len(escalated)} sent to Gemini")
+        for message_id, answer in _classify_with_gemini(escalated).items():
+            # Keep the audit trail: why it was asked, and what the rules found.
+            answer.escalation = verdicts[message_id].escalation
+            answer.rule_score = verdicts[message_id].rule_score
+            verdicts[message_id] = answer
     else:
         print(f"[classifier] all {len(messages)} email(s) settled by rules")
 

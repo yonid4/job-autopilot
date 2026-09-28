@@ -21,9 +21,11 @@ os.environ.setdefault("GOOGLE_CREDENTIALS_PATH", "offline-test")
 import application_matcher as matcher
 import application_status as status
 import check_email
+import discord_notifier
 import email_classifier
+import gemini_client
 from email_classifier import RULES_CONFIDENCE_FLOOR, classify_by_rules
-from email_model import EmailCategory, EmailMessage, EmailVerdict
+from email_model import EmailAnalysis, EmailCategory, EmailMessage, EmailVerdict
 from job_model import ApplicationRow
 
 _failures: list[str] = []
@@ -422,12 +424,128 @@ def test_gemini_gate() -> None:
           result.score >= matcher.RELATED_THRESHOLD, f"score {result.score}")
 
 
+# --- Escalation reasons, extraction and notification details --------------
+
+def reason_for(message: EmailMessage, **sets) -> str:
+    verdict = classify_by_rules(message)
+    return email_classifier._escalation_reason(
+        message, verdict,
+        sets.get("needs_review", set()), sets.get("related", set()), sets.get("unmatched", set()),
+    )
+
+
+def test_escalation_reasons() -> None:
+    print("\nescalation reasons")
+
+    # Straight from the first real run: faint category hints in promotions.
+    promos = [
+        email("LIMITED OFFER - Book Today & Get a $200 Gift Card!",
+              "Congratulations! This offer expires in 3 days. Book now.", id_="p1"),
+        email("Claim it: 20% off 5 rides", "Your promo expires on Sunday. Next steps: open the app.", id_="p2"),
+        email("We're updating our Terms of Service", "These changes take effect at this time next month.", id_="p3"),
+    ]
+    leaked = [m.subject for m in promos if reason_for(m, needs_review={m.id}, unmatched={m.id})]
+    check("promo emails with faint hints stay with the rules", not leaked, str(leaked))
+    labels = email_classifier.classify(promos, {})
+    check("and are logged as other, not as an assessment or rejection",
+          all(v.category == EmailCategory.OTHER for v in labels.values()),
+          str({v.summary[:20]: v.category.value for v in labels.values()}))
+
+    amazon = email("RE: Amazon Opportunity - Virtual Interview Invitation- Yonatan Dayagi - 10382631",
+                   "We'd like to schedule your virtual interview. Please share your availability.",
+                   sender="SP EMEA Loops <sp-scheduling@amazon.jobs>", id_="amzn")
+    check("unmatched good news goes to Gemini for company and role",
+          reason_for(amazon, unmatched={"amzn"}) == email_classifier.REASON_DETAILS,
+          reason_for(amazon, unmatched={"amzn"}))
+    check("a coin-flip row match goes to Gemini to pick the row",
+          reason_for(amazon, needs_review={"amzn"}) == email_classifier.REASON_WHICH_ROW,
+          reason_for(amazon, needs_review={"amzn"}))
+    check("a matched, confident email doesn't need Gemini", reason_for(amazon) == "", reason_for(amazon))
+
+    rejection = email("Update", "Unfortunately we will not be moving forward.", id_="rej")
+    check("a matched-less rejection isn't worth a details call",
+          reason_for(rejection, unmatched={"rej"}) == "", reason_for(rejection, unmatched={"rej"}))
+
+
+def test_gemini_extraction() -> None:
+    print("\ngemini extraction")
+
+    amazon = email("Virtual Interview Invitation", "Please share your availability.",
+                   sender="SP EMEA Loops <sp-scheduling@amazon.jobs>", id_="amzn")
+    row = ApplicationRow(row=5, tab="Sep 20", company="Acme", role="Backend Engineer")
+    canned = [EmailAnalysis(email_id="amzn", category="interview", application_index=0,
+                            confidence=0.97, summary="Amazon wants interview availability.",
+                            company="Amazon", role="Software Development Engineer")]
+
+    original = (gemini_client.is_configured, gemini_client.generate_json)
+    gemini_client.is_configured = lambda: True
+    gemini_client.generate_json = lambda **_: canned
+    try:
+        verdicts = email_classifier.classify([amazon], {"amzn": [row]}, unmatched={"amzn"})
+    finally:
+        gemini_client.is_configured, gemini_client.generate_json = original
+
+    verdict = verdicts["amzn"]
+    check("Gemini's reading replaces the rule verdict", verdict.source == "gemini", verdict.source)
+    check("company and role are read out of the email",
+          verdict.company == "Amazon" and verdict.role == "Software Development Engineer",
+          f"{verdict.company!r} / {verdict.role!r}")
+    check("the reason it was asked is kept for the log",
+          verdict.escalation == email_classifier.REASON_DETAILS, verdict.escalation)
+    check("index 0 means no row, not the first candidate", verdict.matched_row is None, str(verdict.matched_row))
+    check("log tag names Gemini and the reason",
+          check_email._via(verdict) == f"gemini: {email_classifier.REASON_DETAILS}", check_email._via(verdict))
+
+    unanswered = classify_by_rules(amazon)
+    unanswered.escalation = email_classifier.REASON_DETAILS
+    check("log tag admits when Gemini was asked but didn't answer",
+          "didn't answer" in check_email._via(unanswered), check_email._via(unanswered))
+    check("log tag for a rules-only email", check_email._via(classify_by_rules(amazon)) == "rules")
+
+
+def test_notification_details() -> None:
+    print("\nnotification details")
+
+    link = "https://mail.google.com/mail/?authuser=me%40gmail.com#all/abc123"
+    message = email("Virtual Interview Invitation", "Share your availability.", id_="abc123")
+    message = message.model_copy(update={"web_link": link})
+    from_email = EmailVerdict(category=EmailCategory.INTERVIEW, confidence=1.0, source="gemini",
+                              company="Amazon", role="Software Development Engineer")
+
+    embed = discord_notifier.build_embed(message, from_email, None)
+    fields = {f["name"]: f["value"] for f in embed["fields"]}
+    check("title uses the company the email names", embed["title"].endswith("— Amazon"), embed["title"])
+    check("role uses the title the email names",
+          fields.get("Role") == "Software Development Engineer", fields.get("Role"))
+    check("title links to the email", embed.get("url") == link, embed.get("url"))
+    check("links field opens the email", f"[Open email]({link})" in fields.get("Links", ""), fields.get("Links"))
+
+    row = ApplicationRow(row=4, tab="Sep 20", company="Stripe", role="Backend Engineer",
+                         link="https://stripe.com/jobs/1")
+    embed = discord_notifier.build_embed(message, from_email, row)
+    fields = {f["name"]: f["value"] for f in embed["fields"]}
+    check("the sheet row wins over what the email says",
+          embed["title"].endswith("— Stripe") and fields["Role"] == "Backend Engineer",
+          f"{embed['title']} / {fields['Role']}")
+    check("job posting sits next to the email link",
+          "[Job posting](https://stripe.com/jobs/1)" in fields.get("Links", ""), fields.get("Links"))
+
+    bare = discord_notifier.build_embed(email("x", "y"), EmailVerdict(category=EmailCategory.OFFER), None)
+    bare_fields = {f["name"]: f["value"] for f in bare["fields"]}
+    check("nothing known still reads Unknown, with no dead link",
+          bare["title"].endswith("Unknown company") and "Links" not in bare_fields and "url" not in bare,
+          bare["title"])
+
+
 def main() -> None:
     test_classification()
     test_matching()
     test_status_precedence()
     test_planning()
     test_gemini_gate()
+    test_escalation_reasons()
+    test_gemini_extraction()
+    test_notification_details()
     print()
     if _failures:
         print(f"{len(_failures)} check(s) failed:")

@@ -60,16 +60,30 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def build_embed(message: EmailMessage, verdict: EmailVerdict, row: ApplicationRow | None) -> dict:
-    """Discord embed describing one classified email."""
+    """Discord embed describing one classified email.
+
+    Company and role come from the sheet row when there is one; otherwise from
+    what the email itself says (Gemini reads that out), and only then "Unknown".
+    The title links to the email, since replying to it is usually the next step.
+    """
     headline = _HEADLINES.get(verdict.category, verdict.category.value.title())
-    company = (row.company if row else "") or "Unknown company"
-    role = (row.role if row else "") or "Unknown role"
+    company = (row.company if row else "") or verdict.company or "Unknown company"
+    role = (row.role if row else "") or verdict.role or "Unknown role"
 
     fields = [
         {"name": "Role", "value": _truncate(role, _FIELD_VALUE_LIMIT), "inline": True},
         {"name": "From", "value": _truncate(message.sender or "unknown sender", _FIELD_VALUE_LIMIT), "inline": True},
         {"name": "Subject", "value": _truncate(message.subject or "(no subject)", _FIELD_VALUE_LIMIT), "inline": False},
     ]
+
+    links = []
+    if message.web_link:
+        links.append(f"[Open email]({message.web_link})")
+    if row and row.link:
+        links.append(f"[Job posting]({row.link})")
+    if links:
+        fields.append({"name": "Links", "value": " · ".join(links), "inline": False})
+
     if row:
         fields.append({
             "name": "Tracked at",
@@ -90,7 +104,9 @@ def build_embed(message: EmailMessage, verdict: EmailVerdict, row: ApplicationRo
         "fields": fields,
         "footer": {"text": f"job-autopilot · {verdict.source} · confidence {verdict.confidence:.0%}"},
     }
-    if row and row.link:
+    if message.web_link:
+        embed["url"] = message.web_link
+    elif row and row.link:
         embed["url"] = row.link
     if message.received_at:
         embed["timestamp"] = message.received_at.isoformat()

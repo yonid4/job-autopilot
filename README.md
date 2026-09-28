@@ -149,7 +149,12 @@ Output will show scraped jobs, any errors, and a summary of how many were added 
 ## Email status tracking
 
 `check_email.py` reads your inbox, works out what each recruiting email is saying, finds the
-application it belongs to, and updates the sheet. Positive news also goes to Discord.
+application it belongs to, and updates the sheet. Positive news also goes to Discord, with a
+link that opens the email in Gmail. When the email can't be tied to a row, the notification
+uses the company and role the email itself names.
+
+Each line of the run log ends with who decided that email — `[rules]`, or `[gemini: <reason>]`
+when it was sent to Gemini.
 
 ### What it writes
 

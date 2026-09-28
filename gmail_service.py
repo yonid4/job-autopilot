@@ -21,6 +21,7 @@ import html
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 # Third-party
@@ -174,7 +175,29 @@ def _received_at(message: dict, tz: str) -> datetime | None:
         return None
 
 
-def _to_message(message: dict, tz: str) -> EmailMessage:
+def web_link(message_id: str, account: str = "") -> str:
+    """Gmail-on-the-web link that opens this message.
+
+    `#all/` finds it wherever it's filed, archived included. `authuser` picks
+    the right mailbox when the browser is signed in to several Google accounts;
+    without it, Gmail opens whichever account is first (u/0).
+    """
+    base = "https://mail.google.com/mail/"
+    if account:
+        base += f"?authuser={quote(account)}"
+    return f"{base}#all/{message_id}"
+
+
+def _account_email() -> str:
+    """Address of the mailbox being read, for building web links."""
+    try:
+        return get_service().users().getProfile(userId="me").execute().get("emailAddress", "")
+    except Exception as e:  # noqa: BLE001 - links degrade to u/0, the run carries on
+        print(f"[gmail] couldn't read account address ({e}) — email links will open the default account")
+        return ""
+
+
+def _to_message(message: dict, tz: str, account: str = "") -> EmailMessage:
     payload = message.get("payload") or {}
     return EmailMessage(
         id=message["id"],
@@ -183,6 +206,7 @@ def _to_message(message: dict, tz: str) -> EmailMessage:
         sender=_header(payload, "From").strip(),
         body=extract_body(payload),
         received_at=_received_at(message, tz),
+        web_link=web_link(message["id"], account),
     )
 
 
@@ -238,6 +262,7 @@ def fetch_messages(
         return []
 
     tz = os.getenv("TIMEZONE", "America/Los_Angeles")
+    account = _account_email()
     messages: list[EmailMessage] = []
     for index, message_id in enumerate(ids, 1):
         raw = service.users().messages().get(userId="me", id=message_id, format="full").execute()
@@ -245,7 +270,7 @@ def fetch_messages(
         # and get calls would slip through.
         if label_id in (raw.get("labelIds") or []):
             continue
-        messages.append(_to_message(raw, tz))
+        messages.append(_to_message(raw, tz, account))
         if index % 25 == 0:
             print(f"[gmail] fetched {index}/{len(ids)} messages...")
 

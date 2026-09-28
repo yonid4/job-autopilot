@@ -48,6 +48,19 @@ _NOTE_LABELS = {
 }
 
 
+def _via(verdict: EmailVerdict) -> str:
+    """Who decided this email, and why Gemini was asked if it was."""
+    if not verdict.escalation:
+        return "rules"
+    if verdict.source == "gemini":
+        return f"gemini: {verdict.escalation}"
+    return f"rules — Gemini was asked ({verdict.escalation}) but didn't answer"
+
+
+def _log(mark: str, verdict: EmailVerdict, text: str) -> None:
+    print(f"  {mark} {verdict.category.value:16} {text}  [{_via(verdict)}]")
+
+
 def _notify_categories() -> set[EmailCategory]:
     """Categories worth a Discord ping — the positive ones unless configured otherwise."""
     configured = getattr(config, "DISCORD_NOTIFY_CATEGORIES", None)
@@ -106,11 +119,11 @@ def plan_updates(
     for message in messages:
         verdict = verdicts.get(message.id) or EmailVerdict()
         if not verdict.is_actionable:
-            print(f"  · {verdict.category.value:16} {message.subject[:60]!r} — ignored")
+            _log("·", verdict, f"{message.subject[:60]!r} — ignored")
             continue
         if verdict.confidence < MIN_CONFIDENCE:
-            print(f"  ? {verdict.category.value:16} {message.subject[:60]!r} — "
-                  f"confidence {verdict.confidence:.0%} below {MIN_CONFIDENCE:.0%}, skipped")
+            _log("?", verdict, f"{message.subject[:60]!r} — confidence {verdict.confidence:.0%} "
+                               f"below {MIN_CONFIDENCE:.0%}, skipped")
             continue
         # Gemini's pick wins when it made one; it read the email body, while the
         # matcher only sees name and domain overlap.
@@ -127,10 +140,12 @@ def plan_updates(
 
     for message, verdict, row in actionable:
         if row is None:
-            print(f"  ! {verdict.category.value:16} {message.subject[:60]!r} — no matching application")
+            stated = " — ".join(part for part in (verdict.company, verdict.role) if part)
+            _log("!", verdict, f"{message.subject[:60]!r} — no matching application"
+                               + (f" (email says: {stated})" if stated else ""))
         elif (row.tab, row.row) in claimed:
-            print(f"  ! {verdict.category.value:16} {message.subject[:60]!r} — "
-                  f"{row.company} ({row.tab} row {row.row}) already updated this run")
+            _log("!", verdict, f"{message.subject[:60]!r} — "
+                               f"{row.company} ({row.tab} row {row.row}) already updated this run")
         else:
             new_status = status_policy.status_for(verdict.category)
             if new_status and status_policy.is_upgrade(row.status, new_status):
@@ -138,11 +153,11 @@ def plan_updates(
                 updates.append(StatusUpdate(tab=row.tab, row=row.row, status=new_status,
                                             note_column=column, note_text=text))
                 claimed.add((row.tab, row.row))
-                print(f"  > {verdict.category.value:16} {row.company} — {row.role} "
-                      f"({row.tab} row {row.row}): {row.status or 'blank'} -> {new_status}")
+                _log(">", verdict, f"{row.company} — {row.role} "
+                                   f"({row.tab} row {row.row}): {row.status or 'blank'} -> {new_status}")
             else:
-                print(f"  = {verdict.category.value:16} {row.company} — {row.role} "
-                      f"({row.tab} row {row.row}): already {row.status}, left alone")
+                _log("=", verdict, f"{row.company} — {row.role} "
+                                   f"({row.tab} row {row.row}): already {row.status}, left alone")
 
         if verdict.category in notify_categories:
             notifications.append((message, verdict, row))
@@ -174,6 +189,7 @@ def main() -> None:
     candidates_for: dict[str, list[ApplicationRow]] = {}
     needs_review: set[str] = set()
     related: set[str] = set()
+    unmatched: set[str] = set()
     for message in messages:
         result = matcher.best_match(message, rows)
         matches[message.id] = result
@@ -182,8 +198,10 @@ def main() -> None:
             needs_review.add(message.id)
         if result.score >= matcher.RELATED_THRESHOLD:
             related.add(message.id)
+        if not result.matched:
+            unmatched.add(message.id)
 
-    verdicts = classify(messages, candidates_for, needs_review, related)
+    verdicts = classify(messages, candidates_for, needs_review, related, unmatched)
 
     print(f"\n[check_email] {len(messages)} message(s) triaged:")
     updates, notifications = plan_updates(messages, verdicts, matches)

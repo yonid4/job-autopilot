@@ -49,6 +49,7 @@ class EmailMessage(BaseModel):
     sender: str = ""              # raw From header, e.g. 'Stripe Careers <no-reply@stripe.com>'
     body: str = ""                # plain-text body, truncated
     received_at: Optional[datetime] = None
+    web_link: str = ""            # opens this message in Gmail on the web
 
     @property
     def sender_name(self) -> str:
@@ -93,6 +94,14 @@ class EmailVerdict(BaseModel):
     # Set only when Gemini picked an application out of the shortlist; the
     # rule-based matcher's own choice is tracked separately by the caller.
     matched_row: Optional[ApplicationRow] = None
+    # Weighted phrase score behind a rule verdict — how much evidence it rests on.
+    rule_score: int = 0
+    # Why the email was sent to Gemini; "" when the rules settled it alone.
+    escalation: str = ""
+    # Company and job title as the email itself states them (Gemini only). Used
+    # when the email can't be tied to a row in the sheet.
+    company: str = ""
+    role: str = ""
 
     @property
     def is_positive(self) -> bool:
@@ -111,3 +120,5 @@ class EmailAnalysis(BaseModel):
     application_index: int = Field(description="The # of the matching application from the candidate list, or 0 if none match")
     confidence: float = Field(description="Confidence in the category, 0.0 to 1.0")
     summary: str = Field(description="One short sentence describing what the email says")
+    company: str = Field(description="Hiring company named in the email, or empty if none is stated")
+    role: str = Field(description="Job title named in the email, or empty if none is stated")
