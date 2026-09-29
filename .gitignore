@@ -15,3 +15,5 @@ __pycache__/
 
 config.py
 !legacy/config.py
+
+gmail_token.json
