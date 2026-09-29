@@ -68,11 +68,22 @@ class Config:
 
     # Status values written to the Application Status column. These must match
     # your sheet's dropdown exactly, or Sheets will flag the cells as invalid.
-    STATUS_APPLIED = "Applied"
-    STATUS_ASSESSMENT = "Online Assessment"
+    STATUS_APPLIED = "Submitted - Pending Response"
+    STATUS_ASSESSMENT = "OA"
     STATUS_INTERVIEW = "Interviewing"
-    STATUS_OFFER = "Offer"
+    STATUS_OFFER = "Offer Extended - In Progress"
     STATUS_REJECTED = "Rejected"
+    # Waiting-to-hear-back statuses: real news moves them on, auto-replies don't.
+    STATUS_WAITING = ["Sent Follow Up Email", "Re-Applied With Updated Resume", "Ghosted"]
+    # Statuses you close a row out with. The checker never overwrites these, and
+    # also leaves alone any status it doesn't recognise.
+    STATUS_FINAL = [
+        "Offer Extended - Did Not Accept",
+        "Rescinded Application (Self) / Decided not a good fit",
+        "Not For Me",
+        "Job Rec Removed/Deactivated",
+        "N/A",
+    ]
 
     # --- Discord ---
     # Incoming webhook for the notifications channel. Unset = no notifications.

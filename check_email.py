@@ -12,6 +12,7 @@ nothing — worth doing on the first run.
 
 # Standard library
 import os
+from collections import Counter
 
 # Local
 import application_matcher as matcher
@@ -174,6 +175,16 @@ def main() -> None:
         print("[check_email] no applications in the sheet yet — nothing to match against")
         return
 
+    # Rows with a status the checker has no rule for are left alone. That's the
+    # safe default, but it fails quietly — say so up front, because a status
+    # list in config.py that's out of step with the dropdown looks exactly
+    # like this.
+    unrecognised = Counter(row.status for row in rows if not status_policy.is_recognised(row.status))
+    if unrecognised:
+        listed = ", ".join(f"{status!r} ({count})" for status, count in unrecognised.most_common())
+        print(f"[check_email] warning: rows with these statuses will never be updated, because they "
+              f"aren't in config.py's status lists: {listed}")
+
     messages = gmail_service.fetch_messages(
         lookback_hours=LOOKBACK_HOURS,
         processed_label=PROCESSED_LABEL,
@@ -201,7 +212,8 @@ def main() -> None:
         if not result.matched:
             unmatched.add(message.id)
 
-    verdicts = classify(messages, candidates_for, needs_review, related, unmatched)
+    verdicts = classify(messages, candidates_for, needs_review, related, unmatched,
+                        context_for=gmail_service.thread_context)
 
     print(f"\n[check_email] {len(messages)} message(s) triaged:")
     updates, notifications = plan_updates(messages, verdicts, matches)

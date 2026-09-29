@@ -53,11 +53,13 @@ jobs:
               class Config:
                   SHEET_TAB_NAME = "Tracking Template"
                   STATUS_ON_SCRAPE = "Have Not Applied"
-                  STATUS_APPLIED = "Applied"
-                  STATUS_ASSESSMENT = "Online Assessment"
+                  STATUS_APPLIED = "Submitted - Pending Response"
+                  STATUS_ASSESSMENT = "OA"
                   STATUS_INTERVIEW = "Interviewing"
-                  STATUS_OFFER = "Offer"
+                  STATUS_OFFER = "Offer Extended - In Progress"
                   STATUS_REJECTED = "Rejected"
+                  STATUS_WAITING = ["Sent Follow Up Email", "Re-Applied With Updated Resume", "Ghosted"]
+                  STATUS_FINAL = ["Offer Extended - Did Not Accept", "Rescinded Application (Self) / Decided not a good fit", "Not For Me", "Job Rec Removed/Deactivated", "N/A"]
                   EMAIL_LOOKBACK_HOURS = 48
                   EMAIL_MAX_RESULTS = 150
                   EMAIL_PROCESSED_LABEL = "Job Autopilot/Processed"

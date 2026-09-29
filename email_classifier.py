@@ -14,6 +14,7 @@ is acted on.
 
 # Standard library
 import re
+from typing import Callable
 
 # Local
 import gemini_client
@@ -24,6 +25,7 @@ from email_model import (
     EmailCategory,
     EmailMessage,
     EmailVerdict,
+    compact_text,
 )
 from job_model import ApplicationRow
 
@@ -238,15 +240,21 @@ def _candidate_block(candidates: list[ApplicationRow]) -> str:
     )
 
 
-def _build_prompt(items: list[tuple[EmailMessage, list[ApplicationRow]]]) -> str:
-    sections = "\n\n".join(
+def _email_section(message: EmailMessage, candidates: list[ApplicationRow]) -> str:
+    section = (
         f"EMAIL ID: {message.id}\n"
         f"- From: {message.sender}\n"
         f"- Subject: {message.subject}\n"
         f"- Body: {message.preview()}\n"
-        f"- Open applications that might match:\n{_candidate_block(candidates)}"
-        for message, candidates in items
     )
+    if message.thread_context:
+        section += (f"- Earlier messages in the same thread (context only): "
+                    f"{compact_text(message.thread_context, 3000)}\n")
+    return section + f"- Open applications that might match:\n{_candidate_block(candidates)}"
+
+
+def _build_prompt(items: list[tuple[EmailMessage, list[ApplicationRow]]]) -> str:
+    sections = "\n\n".join(_email_section(message, candidates) for message, candidates in items)
 
     return f"""
 You are triaging a job applicant's inbox. For each email below, decide what it says about
@@ -269,8 +277,11 @@ RULES:
 - Set application_index to the # of the one application the email is about. Use 0 if the email
   matches none of the listed applications, or if you cannot tell which one it is.
 - Set company to the hiring company and role to the job title, exactly as the email states them.
-  Fill these in even when application_index is 0. Leave either empty if the email doesn't say —
-  never guess a title the email doesn't mention.
+  Fill these in even when application_index is 0. Leave either empty if neither the email nor
+  its earlier thread messages say — never guess a title that isn't written down.
+- Earlier thread messages are context only. They may supply the company and job title (a
+  "just following up" reply rarely repeats them), but the category must describe the email
+  itself, not what came before it.
 - Set confidence to how certain you are of the category, from 0.0 to 1.0.
 - Keep summary to one short sentence, under 120 characters.
 - Return exactly one result per email, using the EMAIL ID given above.
@@ -365,6 +376,7 @@ def classify(
     needs_review: set[str] | None = None,
     related: set[str] | None = None,
     unmatched: set[str] | None = None,
+    context_for: Callable[[EmailMessage], str] | None = None,
 ) -> dict[str, EmailVerdict]:
     """Classify every message, escalating only the unclear ones to Gemini.
 
@@ -372,7 +384,8 @@ def classify(
     refer to; `needs_review` names emails whose row match was a coin flip;
     `related` names emails with real evidence of being about an application;
     `unmatched` names emails no row could be found for. Each verdict records in
-    `escalation` why it went to Gemini, if it did.
+    `escalation` why it went to Gemini, if it did. `context_for` fetches the
+    rest of an email's thread; it's only called for emails sent to Gemini.
     """
     needs_review = needs_review or set()
     related = related or set()
@@ -398,6 +411,9 @@ def classify(
     if escalated:
         print(f"[classifier] {len(messages) - len(escalated)} email(s) settled by rules, "
               f"{len(escalated)} sent to Gemini")
+        if context_for:
+            for message, _ in escalated:
+                message.thread_context = context_for(message)
         for message_id, answer in _classify_with_gemini(escalated).items():
             # Keep the audit trail: why it was asked, and what the rules found.
             answer.escalation = verdicts[message_id].escalation

@@ -161,20 +161,29 @@ when it was sent to Gemini.
 | Email says | Application Status becomes | Where the detail goes |
 |---|---|---|
 | Rejection | `Rejected` | Rejection Reason (column G) |
-| Online assessment / coding challenge | `Online Assessment` | Notes (column F) |
+| Online assessment / coding challenge | `OA` | Notes (column F) |
 | Interview invite or scheduling | `Interviewing` | Notes (column F) |
-| Offer | `Offer` | Notes (column F) |
-| "We received your application" | `Applied` | Notes (column F) |
+| Offer | `Offer Extended - In Progress` | Notes (column F) |
+| "We received your application" | `Submitted - Pending Response` | Notes (column F) |
 | Job alerts, newsletters, anything else | unchanged | — |
 
 Each note is stamped with the email's date, e.g.
 `[2026-09-22] Online assessment: Next step — your HackerRank assessment`. The existing cell
 contents are kept underneath, so the Gemini fit analysis already in Notes isn't lost.
 
-A row only ever moves **forward**: `Have Not Applied` → `Applied` → `Online Assessment` →
-`Interviewing` → `Offer`, with `Rejected` landing from anywhere. A late auto-reply can't knock a
-row back from `Interviewing`. Column I (Date Submitted) is never touched — it records when *you*
-applied, not when they replied.
+A row only ever moves **forward**: `Have Not Applied` → `Submitted - Pending Response` → `OA` →
+`Interviewing` → `Offer Extended - In Progress`, with `Rejected` landing from anywhere. A late
+auto-reply can't knock a row back from `Interviewing`. `Sent Follow Up Email`, `Re-Applied With
+Updated Resume` and `Ghosted` sit level with `Submitted - Pending Response`: real news moves them
+on, an auto-reply doesn't.
+
+Rows you've closed out yourself — `Not For Me`, `Offer Extended - Did Not Accept`,
+`Rescinded Application (Self) / Decided not a good fit`, `Job Rec Removed/Deactivated`, `N/A` —
+are never overwritten, and neither is any status the checker doesn't recognise. Good news for
+those still reaches Discord. If your sheet has statuses the checker has no rule for, the run log
+lists them at the start.
+
+Column I (Date Submitted) is never touched — it records when *you* applied, not when they replied.
 
 Because the scraper writes a new tab per run, the checker scans **every** tracking tab in the
 spreadsheet (any tab whose first header cell is "Company Name"), not just today's.
@@ -218,7 +227,9 @@ phone. With no webhook set, the checker still updates the sheet and just skips n
 
 **3. Check the status strings.** `STATUS_APPLIED`, `STATUS_ASSESSMENT`, `STATUS_INTERVIEW`,
 `STATUS_OFFER` and `STATUS_REJECTED` in `config.py` must match your sheet's Application Status
-dropdown exactly, or Sheets will flag the cells as invalid entries.
+dropdown exactly, or Sheets will flag the cells as invalid entries. The defaults match the tracking
+template. `STATUS_WAITING` and `STATUS_FINAL` list the dropdown's other options, so the checker
+knows which to move on from and which to leave alone.
 
 ### Running
 

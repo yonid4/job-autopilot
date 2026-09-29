@@ -46,6 +46,9 @@ _CLIENT_SECRET_PATH = os.getenv("GMAIL_CLIENT_SECRET_PATH", "gmail_client_secret
 # and trimming keeps Gemini prompts small.
 _BODY_MAX_CHARS = 4000
 
+# How much of the rest of a thread to hand Gemini alongside an email.
+_THREAD_CONTEXT_MAX_CHARS = 3000
+
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b.*?</\1>", re.IGNORECASE | re.DOTALL)
 _BREAK_RE = re.compile(r"<(?:br|/p|/div|/tr|/h[1-6])\s*/?>", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -208,6 +211,33 @@ def _to_message(message: dict, tz: str, account: str = "") -> EmailMessage:
         received_at=_received_at(message, tz),
         web_link=web_link(message["id"], account),
     )
+
+
+def thread_context(message: EmailMessage) -> str:
+    """The other messages in this email's thread, oldest first, as plain text.
+
+    Only called for emails going to Gemini. Oldest-first means the original
+    invite — where the company and job title are spelled out — survives the
+    length cap ahead of later chatter.
+    """
+    if not message.thread_id:
+        return ""
+    try:
+        thread = get_service().users().threads().get(
+            userId="me", id=message.thread_id, format="full",
+        ).execute()
+    except Exception as e:  # noqa: BLE001 - context is a bonus; classify without it
+        print(f"[gmail] couldn't read the thread for {message.subject[:40]!r} ({e})")
+        return ""
+
+    parts = []
+    for raw in thread.get("messages", []):
+        if raw.get("id") == message.id:
+            continue
+        payload = raw.get("payload") or {}
+        header = f"[From: {_header(payload, 'From')} | Subject: {_header(payload, 'Subject')}]"
+        parts.append(f"{header}\n{extract_body(payload)}")
+    return "\n\n".join(parts)[:_THREAD_CONTEXT_MAX_CHARS]
 
 
 def ensure_label(name: str) -> str:

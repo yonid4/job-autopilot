@@ -266,8 +266,31 @@ def test_status_precedence() -> None:
           status.is_upgrade(status.STATUS_OFFER, status.STATUS_REJECTED))
     check("re-reading the same rejection is a no-op",
           not status.is_upgrade(status.STATUS_REJECTED, status.STATUS_REJECTED))
-    check("unknown status is treated as the start of the funnel",
-          status.is_upgrade("Waiting on referral", status.STATUS_INTERVIEW))
+    check("an unrecognised status is left alone",
+          not status.is_upgrade("Waiting on referral", status.STATUS_INTERVIEW))
+    check("a blank status can be filled in", status.is_upgrade("", status.STATUS_APPLIED))
+
+    # The tracking template's real dropdown.
+    for closed in ("Offer Extended - Did Not Accept", "Not For Me", "Job Rec Removed/Deactivated",
+                   "Rescinded Application (Self) / Decided not a good fit", "N/A"):
+        check(f"{closed!r} is never overwritten, not even by a rejection",
+              not status.is_upgrade(closed, status.STATUS_REJECTED)
+              and not status.is_upgrade(closed, status.STATUS_INTERVIEW))
+    for waiting in ("Sent Follow Up Email", "Re-Applied With Updated Resume", "Ghosted"):
+        check(f"{waiting!r} moves on for real news",
+              status.is_upgrade(waiting, status.STATUS_INTERVIEW) and status.is_upgrade(waiting, status.STATUS_REJECTED))
+        check(f"{waiting!r} survives an application auto-reply",
+              not status.is_upgrade(waiting, status.STATUS_APPLIED))
+    check("every template status is recognised", all(status.is_recognised(s_) for s_ in (
+        "Have Not Applied", "Submitted - Pending Response", "Rejected", "Interviewing",
+        "Offer Extended - In Progress", "Job Rec Removed/Deactivated", "Ghosted",
+        "Offer Extended - Did Not Accept", "Re-Applied With Updated Resume",
+        "Rescinded Application (Self) / Decided not a good fit", "Not For Me",
+        "Sent Follow Up Email", "N/A", "OA")))
+    check("statuses written are the template's own wording",
+          [status.STATUS_APPLIED, status.STATUS_ASSESSMENT, status.STATUS_INTERVIEW,
+           status.STATUS_OFFER, status.STATUS_REJECTED]
+          == ["Submitted - Pending Response", "OA", "Interviewing", "Offer Extended - In Progress", "Rejected"])
     check("category with no status implication returns None",
           status.status_for(EmailCategory.OTHER) is None)
 
@@ -537,6 +560,46 @@ def test_notification_details() -> None:
           bare["title"])
 
 
+# --- What Gemini gets to read ---------------------------------------------
+
+def test_gemini_context() -> None:
+    print("\ngemini context")
+
+    tracking = "https://www.amazon.jobs/en/landing_pages/candidate-support?utm_source=scheduling&ref=" + "x" * 80
+    long_reply = ("Just following up on the email below. " + f"Candidate FAQs <{tracking}> " * 12
+                  + "On behalf of Amazon, we invite you to interview for the Software Dev Engineer position.")
+    message = email("RE: Amazon Opportunity - Virtual Interview Invitation", long_reply,
+                    sender="SP EMEA Loops <sp-scheduling@amazon.jobs>", id_="long")
+    check("a title deep in a link-heavy reply still reaches Gemini",
+          "Software Dev Engineer" in message.preview() and long_reply.find("Software Dev Engineer") > 1200,
+          f"title at char {long_reply.find('Software Dev Engineer')}")
+    check("links are shortened in the prompt", "[link]" in message.preview() and "utm_source" not in message.preview())
+
+    # A follow-up that doesn't quote the invite: the title is only in the thread.
+    followup = email("RE: Amazon Opportunity - Virtual Interview Invitation",
+                     "Hi Yonatan, just following up on my earlier email. Could you share your availability?",
+                     sender="SP EMEA Loops <sp-scheduling@amazon.jobs>", id_="fu")
+    junk = email("BIG FALL SALE", "Everything must go.", sender="Shop <deals@shop.example>", id_="junk")
+    asked_for: list[str] = []
+
+    def fake_context(m: EmailMessage) -> str:
+        asked_for.append(m.id)
+        return "[From: SP EMEA Loops | Subject: Amazon Opportunity]\nInvite for the Software Dev Engineer position."
+
+    prompts: list[str] = []
+    original = (gemini_client.is_configured, gemini_client.generate_json)
+    gemini_client.is_configured = lambda: True
+    gemini_client.generate_json = lambda **kw: prompts.append(kw["system_instruction"]) or []
+    try:
+        email_classifier.classify([followup, junk], {}, unmatched={"fu", "junk"}, context_for=fake_context)
+    finally:
+        gemini_client.is_configured, gemini_client.generate_json = original
+
+    check("thread context is fetched only for emails going to Gemini", asked_for == ["fu"], str(asked_for))
+    check("the earlier invite's title is in the prompt",
+          prompts and "Earlier messages in the same thread" in prompts[0] and "Software Dev Engineer" in prompts[0])
+
+
 def main() -> None:
     test_classification()
     test_matching()
@@ -546,6 +609,7 @@ def main() -> None:
     test_escalation_reasons()
     test_gemini_extraction()
     test_notification_details()
+    test_gemini_context()
     print()
     if _failures:
         print(f"{len(_failures)} check(s) failed:")

@@ -10,8 +10,19 @@ from pydantic import BaseModel, Field
 # Local
 from job_model import ApplicationRow
 
+_URL_RE = re.compile(r"https?://\S+")
 _ADDRESS_RE = re.compile(r"^\s*(?:\"?(?P<name>[^\"<]*?)\"?\s*)?<?(?P<email>[^<>\s]+@[^<>\s]+)>?\s*$")
 _PUBLIC_MAIL_DOMAINS = frozenset({"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "aol.com", "proton.me", "protonmail.com"})
+
+
+def compact_text(text: str, limit: int) -> str:
+    """Text squeezed for a prompt: links become "[link]" and whitespace collapses.
+
+    Plain-text recruiting mail spells out every link as a long tracking URL;
+    left in, a handful of them crowd out the sentences that name the job.
+    """
+    text = _URL_RE.sub("[link]", text or "")
+    return " ".join(text.split())[:limit]
 
 
 class EmailCategory(str, Enum):
@@ -50,6 +61,10 @@ class EmailMessage(BaseModel):
     body: str = ""                # plain-text body, truncated
     received_at: Optional[datetime] = None
     web_link: str = ""            # opens this message in Gmail on the web
+    # Earlier messages in the same thread, fetched only for emails sent to
+    # Gemini. A "just following up" reply often doesn't quote the invite it
+    # follows, so the job title lives only in the message before it.
+    thread_context: str = ""
 
     @property
     def sender_name(self) -> str:
@@ -78,10 +93,9 @@ class EmailMessage(BaseModel):
         """Date stamp written into the sheet, e.g. '2026-09-22'."""
         return self.received_at.strftime("%Y-%m-%d") if self.received_at else ""
 
-    def preview(self, limit: int = 1200) -> str:
-        """Body trimmed for prompts and log lines."""
-        body = " ".join((self.body or "").split())
-        return body[:limit]
+    def preview(self, limit: int = 4000) -> str:
+        """Body squeezed for a prompt — see compact_text."""
+        return compact_text(self.body, limit)
 
 
 class EmailVerdict(BaseModel):
