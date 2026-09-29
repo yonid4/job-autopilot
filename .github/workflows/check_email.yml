@@ -7,12 +7,6 @@ on:
     # processed-label bookkeeping means a missed or delayed run is caught up by
     # the next one rather than lost.
     - cron: "0 15 * * *"
-  # TEMPORARY: lets the workflow run from this branch before it is on main
-  # (workflow_dispatch only works for workflows on the default branch). Remove
-  # before opening the PR.
-  push:
-    branches:
-      - claude/email-status-spreadsheet-marker-lg9n2a
   workflow_dispatch:
     inputs:
       branch:
@@ -38,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.branch || (github.event_name == 'push' && github.ref_name) || 'linkedin-hiringcafe' }}
+          ref: ${{ github.event.inputs.branch || 'linkedin-hiringcafe' }}
 
       - uses: actions/setup-python@v5
         with:
