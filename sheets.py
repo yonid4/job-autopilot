@@ -25,7 +25,7 @@ _SCORE_COLUMN_INDEX = 9
 
 # Conditional formatting: highlight rows with Score >= threshold in
 # Google Sheets' "light green 1" swatch (#b7e1cd).
-_SCORE_HIGHLIGHT_THRESHOLD = 95
+_SCORE_HIGHLIGHT_THRESHOLD = 90
 _LIGHT_GREEN_1 = {"red": 0.717647, "green": 0.882353, "blue": 0.803922}
 _SCORE_HIGHLIGHT_FORMULA = f"=$J2>={_SCORE_HIGHLIGHT_THRESHOLD}"
 
@@ -166,7 +166,7 @@ def append_jobs(jobs: list[Job]) -> None:
 
 def ensure_score_highlight_rule() -> None:
     """Ensure a conditional formatting rule exists that colors entire data
-    rows light green 1 when Score (column J) >= 95.
+    rows light green 1 when Score (column J) >= 90.
 
     Idempotent — checks for an existing matching rule before adding one, so
     it's safe to call on every run. The rule uses an open-ended row range,
