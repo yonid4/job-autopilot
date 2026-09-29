@@ -213,7 +213,7 @@ labels. It cannot send or delete mail.
 
 **2. Discord notifications.** In your Discord server, open the notifications channel →
 **Edit Channel → Integrations → Webhooks → New Webhook → Copy Webhook URL**, and set it as
-`DISCORD_WEBHOOK_NOTIFICATIONS_URL`. Optionally set `DISCORD_MENTION` to `<@your-user-id>` so pings reach your
+`DISCORD_WEBHOOK_URL`. Optionally set `DISCORD_MENTION` to `<@your-user-id>` so pings reach your
 phone. With no webhook set, the checker still updates the sheet and just skips notifying.
 
 **3. Check the status strings.** `STATUS_APPLIED`, `STATUS_ASSESSMENT`, `STATUS_INTERVIEW`,
@@ -232,7 +232,7 @@ A dry run leaves Gmail untouched too, so you can repeat it until the plan looks 
 To run it on a schedule, the `.github/workflows/check_email.yml` workflow must live on the
 repo's **default branch** — GitHub only schedules workflows from there — while it checks the code
 out from `linkedin-hiringcafe`. It needs these secrets: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`,
-`GMAIL_REFRESH_TOKEN`, `DISCORD_WEBHOOK_NOTIFICATIONS_URL`, plus the `SPREAD_SHEET_ID`, `GOOGLE_SHEETS_CREDS`
+`GMAIL_REFRESH_TOKEN`, `DISCORD_WEBHOOK_URL`, plus the `SPREAD_SHEET_ID`, `GOOGLE_SHEETS_CREDS`
 and `GEMINI_API_KEY(S)` the scraper already uses.
 
 ### Tests
