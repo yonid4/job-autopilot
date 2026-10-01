@@ -2,11 +2,12 @@ name: Check Application Email
 
 on:
   schedule:
-    # Once a day at 15:00 UTC — 8am Pacific in summer, 7am in winter (cron is
-    # UTC and doesn't follow daylight saving). The 48h lookback plus the
-    # processed-label bookkeeping means a missed or delayed run is caught up by
-    # the next one rather than lost.
-    - cron: "0 15 * * *"
+    # Once a day at 14:47 UTC — 7:47am Pacific in summer, 6:47am in winter (cron
+    # is UTC and doesn't follow daylight saving). Off the top of the hour on
+    # purpose: GitHub's scheduler is busiest at :00, so runs there are delayed
+    # the most. The 48h lookback plus the processed-label bookkeeping means a
+    # missed or delayed run is caught up by the next one rather than lost.
+    - cron: "47 14 * * *"
   workflow_dispatch:
     inputs:
       branch:
