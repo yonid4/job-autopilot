@@ -6,16 +6,17 @@ Automatically scrapes job postings, filters them against your resume using Gemin
 
 1. **Scrapes** job listings from your chosen source — LinkedIn (cookie-based auth via the `linkedin-api` library) or [hiring.cafe](https://hiring.cafe) (no authentication required). Select one with the `SCRAPER` config variable.
 2. **Parses** your resume PDF using Gemini to extract structured data (cached as `resume.json`)
-3. **Qualifies** each job by scoring resume-to-job fit with Gemini AI — only jobs scoring ≥ 80/100 pass
-4. **Writes** new qualifying jobs to your Google Sheet, skipping duplicates
+3. **Qualifies** each job by scoring resume-to-job fit with Gemini AI — only jobs scoring ≥ 80/100 pass. The score goes in the Score column and Gemini's reasoning and matching strengths go in Notes.
+4. **Writes** new qualifying jobs to your Google Sheet, skipping duplicates and blocked companies
+5. **Sorts** the tab by Score, highest first, and highlights rows scoring ≥ 90 in light green
 
 And separately, on its own schedule (`check_email.py`):
 
-5. **Reads** recent mail from your Gmail inbox
-6. **Classifies** each message — rejection, online assessment, interview, offer, acknowledgement, or noise
-7. **Matches** it to the application it's about, across every tab in your sheet
-8. **Marks** the row's Application Status and records what the email said
-9. **Notifies** you on Discord when the news is good
+6. **Reads** recent mail from your Gmail inbox
+7. **Classifies** each message — rejection, online assessment, interview, offer, acknowledgement, or noise
+8. **Matches** it to the application it's about, across every tab in your sheet
+9. **Marks** the row's Application Status and records what the email said
+10. **Notifies** you on Discord when the news is good
 
 See [Email status tracking](#email-status-tracking) below.
 
@@ -41,7 +42,13 @@ pip install -r requirements.txt
 
 ### 2. Configure environment variables
 
-Create a `.env` file in the project root:
+Copy the example and fill it in:
+
+```bash
+cp .env.example .env
+```
+
+The scraper needs these:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
@@ -52,10 +59,14 @@ LINKEDIN_JSESSIONID=your_jsessionid_cookie_value
 ```
 
 - **`GEMINI_API_KEY`** — from [Google AI Studio](https://aistudio.google.com/app/apikey)
+- **`GEMINI_API_KEYS`** *(optional)* — a comma-separated pool of keys; when one hits its quota the next is used
 - **`GOOGLE_SHEET_ID`** — the long ID in your Google Sheet URL: `https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit`
 - **`GOOGLE_CREDENTIALS_PATH`** — path to your service account JSON key file (see step 3)
 - **`LINKEDIN_LI_AT`** — your LinkedIn `li_at` session cookie (see "Getting LinkedIn Cookies" below)
 - **`LINKEDIN_JSESSIONID`** — your LinkedIn `JSESSIONID` cookie (see "Getting LinkedIn Cookies" below)
+
+`.env.example` also lists the Gmail and Discord variables the email checker uses — see
+[Email status tracking](#email-status-tracking).
 
 ### 3. Getting LinkedIn Cookies
 
@@ -91,6 +102,9 @@ The sheet has a tab named `"Tracking Template"` with these columns:
 | Company Name | Application Status | Title | Description | Link to Job Req | Notes | Rejection Reason | Salary | Date Submitted | Score |
 
 Row 1 is the header row. The script writes into the first blank row in column A, preserving any existing formatting.
+
+If the tab named by `SHEET_TAB_NAME` doesn't exist yet, the scraper creates it by copying the
+template (header only), so you can point each run at a fresh tab.
 
 ### 6. Add your resume
 
@@ -144,7 +158,25 @@ SCRAPER=hiringcafe python3 main.py   # override the scraper for this run
 ```
 
 `main.py` runs the scraper named by `SCRAPER` (the `SCRAPER` env var wins over `config.py`).
-Output will show scraped jobs, any errors, and a summary of how many were added vs. skipped as duplicates.
+Output will show scraped jobs, any errors, Gemini's progress batch by batch, and a summary of how
+many were added vs. skipped as duplicates.
+
+If Gemini is overloaded (503) for a batch, those jobs aren't dropped silently: the prompt for each
+failed batch is written to the GitHub Actions run summary (or printed, when run locally), so you
+can paste it into [Gemini](https://gemini.google.com) by hand.
+
+### Running on a schedule
+
+- **Locally:** `python3 scheduler.py` runs `main.py` every `HOURS_OLD` hours between 5am and 6pm
+  Pacific.
+- **GitHub Actions:** the **Run Job Scraper** workflow (`.github/workflows/dispatch.yml` on the
+  default branch) is started by hand from the Actions tab. It writes its own `config.py`, so the
+  search settings live in the workflow file. Its inputs pick the code branch, scraper,
+  `HOURS_OLD`, `RESULTS_WANTED`, and the tab to write to (default: today's Pacific date, e.g.
+  `Jun 24`, created from the template if needed). It needs these secrets: `SPREAD_SHEET_ID`,
+  `GOOGLE_SHEETS_CREDS` (the service account JSON), `RESUME_JSON` (the contents of your
+  `resume.json`), `GEMINI_API_KEY` and/or `GEMINI_API_KEYS`, plus `LINKEDIN_LI_AT` and
+  `LINKEDIN_JSESSIONID` for the LinkedIn scraper. `PROXIES` is optional.
 
 ## Email status tracking
 
@@ -240,13 +272,15 @@ python3 check_email.py                   # for real
 
 A dry run leaves Gmail untouched too, so you can repeat it until the plan looks right.
 
-To run it on a schedule, the `.github/workflows/check_email.yml` workflow must live on the
-repo's **default branch** — GitHub only schedules workflows from there — while it checks the code
-out from `linkedin-hiringcafe`. It needs these secrets: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`,
+The **Check Application Email** workflow (`.github/workflows/check_email.yml`) runs it once a day
+at 14:47 UTC, and can also be started by hand with a branch, lookback window and dry-run toggle.
+It must live on the repo's **default branch** — GitHub only schedules workflows from there — while
+it checks the code out from `linkedin-hiringcafe`. It needs these secrets: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`,
 `GMAIL_REFRESH_TOKEN`, `DISCORD_WEBHOOK_URL`, plus the `SPREAD_SHEET_ID`, `GOOGLE_SHEETS_CREDS`
-and `GEMINI_API_KEY(S)` the scraper already uses.
+and `GEMINI_API_KEY(S)` the scraper already uses. `DISCORD_MENTION` is read from a repository
+*variable* rather than a secret.
 
-### Tests
+## Tests
 
 ```bash
 python3 test_email_tracker.py
@@ -255,16 +289,24 @@ python3 test_email_tracker.py
 Runs offline against fixtures — no Gmail, Sheets, Gemini or credentials needed. Covers the
 classifier, the email-to-row matcher and the status ladder.
 
+```bash
+python3 test_hiringcafe.py
+```
+
+A smoke test for the hiring.cafe scraper. It calls the real hiring.cafe API with your
+`config.py` filters, with a smaller result limit, and prints what came back.
+
 ## Project Structure
 
 ```
 job-autopilot/
 ├── main.py              # Entry point — selects scraper and orchestrates the pipeline
+├── scheduler.py         # Runs main.py every HOURS_OLD hours, 5am–6pm Pacific
 ├── linkedin_service.py  # Fetches jobs via LinkedIn API (cookie auth)
 ├── hiringcafe_service.py # Fetches jobs from hiring.cafe (no auth)
 ├── qualifiar.py         # Gemini AI resume-to-job scoring
 ├── resume_processor.py  # PDF parsing and resume caching
-├── sheets.py            # Google Sheets read/write
+├── sheets.py            # Google Sheets read/write, tab creation, sorting, highlighting
 ├── job_model.py         # Job and tracking-row data models
 ├── check_email.py       # Entry point — inbox -> sheet status + Discord
 ├── gmail_service.py     # Gmail OAuth, fetching, processed-label bookkeeping
@@ -275,10 +317,16 @@ job-autopilot/
 ├── discord_notifier.py  # Webhook notifications for good news
 ├── gemini_client.py     # Shared Gemini JSON calls with key rotation
 ├── test_email_tracker.py # Offline tests for the email pipeline
-├── config.py            # All configuration
+├── test_hiringcafe.py   # Live smoke test for the hiring.cafe scraper
+├── config.example.py    # Configuration template
+├── config.py            # Your configuration (not committed)
+├── .env.example         # Environment variable template
 ├── requirements.txt
+├── .github/workflows/
+│   └── check_email.yml  # Daily email check (the scraper workflow lives on the default branch)
 ├── .env                 # Your secrets (not committed)
 ├── resume.pdf           # Your resume (not committed)
+├── gmail_client_secret.json # Gmail OAuth client (not committed)
 ├── gmail_token.json     # Gmail OAuth token (not committed)
 ├── credentials/         # Google service account key (not committed)
 └── resume.json          # Cached parsed resume (not committed)
