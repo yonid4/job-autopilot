@@ -65,18 +65,49 @@ class ResumeData(BaseModel):
 
 # --- Core functions ---
 
+def extract_links_from_page(page) -> list[str]:
+    # Hyperlink targets live in /Link annotations, not in the page text
+    links = []
+    for annot in page.get("/Annots") or []:
+        annot = annot.get_object()
+        uri = annot.get("/A", {}).get("/URI")
+        if annot.get("/Subtype") != "/Link" or not uri:
+            continue
+        x1, y1, x2, y2 = (float(v) for v in annot["/Rect"])
+        anchor = []
+
+        def visitor(text, cm, tm, _font_dict, _font_size):
+            # Text position in page space = text matrix translated by the CTM
+            x = tm[4] * cm[0] + tm[5] * cm[2] + cm[4]
+            y = tm[4] * cm[1] + tm[5] * cm[3] + cm[5]
+            if x1 - 1 <= x <= x2 + 1 and y1 - 2 <= y <= y2 + 2:
+                anchor.append(text)
+
+        page.extract_text(visitor_text=visitor)
+        anchor_text = " ".join("".join(anchor).split()).strip(" |")
+        links.append(f"{anchor_text or '(no text)'} -> {uri}")
+    return links
+
+
 def extract_text_from_pdf(file_path: str) -> str:
     text = ""
+    links = []
     with open(file_path, "rb") as f:
         reader = PyPDF2.PdfReader(f)
         for page in reader.pages:
             text += page.extract_text() + "\n"
+            links += extract_links_from_page(page)
+    if links:
+        text += "\nHyperlinks (link text -> URL, in document order):\n" + "\n".join(links)
     return text.strip()
 
 
 def analyze_resume(resume_text: str) -> ResumeData:
     data = gemini_client.generate_json(
-        system_instruction="Extract structured information from the resume.",
+        system_instruction=(
+            "Extract structured information from the resume. "
+            "If there is a hyperlink, set the URL to the hyperlink instead of the text"
+        ),
         contents=resume_text,
         response_schema=ResumeData,
     )
