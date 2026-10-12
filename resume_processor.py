@@ -1,17 +1,14 @@
 # Standard library
 import json
 import os
+import sys
 
 # Third-party
-from google import genai
-from google.genai import types
 from pydantic import BaseModel
 import PyPDF2
 
 # Local
-from config import Config as config
-
-client = genai.Client(api_key=config.GEMINI_API_KEY)
+import gemini_client
 
 
 # --- Structured output schema ---
@@ -78,16 +75,14 @@ def extract_text_from_pdf(file_path: str) -> str:
 
 
 def analyze_resume(resume_text: str) -> ResumeData:
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        config=types.GenerateContentConfig(
-            system_instruction="Extract structured information from the resume.",
-            response_mime_type="application/json",
-            response_schema=ResumeData,
-        ),
+    data = gemini_client.generate_json(
+        system_instruction="Extract structured information from the resume.",
         contents=resume_text,
+        response_schema=ResumeData,
     )
-    return response.parsed
+    if data is None:
+        raise RuntimeError("Gemini returned no resume data")
+    return data
 
 
 RESUME_JSON_PATH = os.path.join(os.path.dirname(__file__), "resume.json")
@@ -107,3 +102,15 @@ def process_resume(file_path: str) -> ResumeData:
         json.dump(data.model_dump(), f, indent=2)
     print(f"Resume saved to {RESUME_JSON_PATH}")
     return load_resume()
+
+
+def main() -> None:
+    file_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+        os.path.dirname(__file__), "resume.pdf"
+    )
+    process_resume(file_path)
+
+
+if __name__ == "__main__":
+    main()
+
