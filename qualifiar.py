@@ -36,6 +36,7 @@ class QualifierData(BaseModel):
 def _create_analysis_prompt(jobs: list[Job], resume: ResumeData) -> str:
     experience_lines = "\n".join(
         f"  - {e.title} at {e.company} ({e.duration}): {e.description}"
+        + "".join(f"\n      * {a}" for a in e.key_achievements)
         for e in resume.experience
     )
     project_lines = "\n".join(
@@ -44,6 +45,8 @@ def _create_analysis_prompt(jobs: list[Job], resume: ResumeData) -> str:
     )
     education_lines = "\n".join(
         f"  - {e.degree} in {e.field} from {e.school} ({e.graduation_year})"
+        + (f", GPA {e.gpa}" if e.gpa else "")
+        + (f"\n    Relevant courses: {', '.join(e.relevant_courses)}" if e.relevant_courses else "")
         for e in resume.education
     )
 
@@ -65,7 +68,9 @@ Return one result per job, in the same order as the jobs are listed.
 {job_sections}
 
 CANDIDATE RESUME:
-- Summary: {resume.summary}
+- Summary: {resume.summary or 'None'}
+- Location: {resume.personal_info.location or 'Not listed'}
+- Total Professional Experience: {resume.total_years_experience} year(s) ({resume.total_months_experience} months)
 - Education:
 {education_lines or "  None listed"}
 - Experience:
@@ -74,6 +79,7 @@ CANDIDATE RESUME:
 - Programming Languages: {', '.join(resume.skills.programming_languages) or 'None'}
 - Frameworks: {', '.join(resume.skills.frameworks) or 'None'}
 - Tools: {', '.join(resume.skills.tools) or 'None'}
+- Soft Skills: {', '.join(resume.skills.soft_skills) or 'None'}
 - Certifications: {', '.join(resume.certifications) or 'None'}
 - Projects:
 {project_lines or "  None listed"}
