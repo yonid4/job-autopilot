@@ -52,7 +52,7 @@ def print_search_context() -> None:
         print(f"    dateFetchedPastNDays:  {search_state.get('dateFetchedPastNDays', '(not set — any)')}")
 
         # Exact request URL for page 0 (PreparedRequest matches requests' encoding).
-        data_url = f"{hiringcafe_service._BASE}/_next/data/{build_id}/index.json"
+        data_url = hiringcafe_service._data_url(build_id)
         prepared = requests.Request(
             "GET", data_url, params={"searchState": json.dumps(search_state), "page": 0}
         ).prepare()

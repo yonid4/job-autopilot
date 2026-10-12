@@ -24,8 +24,10 @@ _JOB_DESCRIPTION_URL = f"{_BASE}/api/job-description"
 # hiring.cafe's public POST /api/search-jobs endpoint is locked down (405/401).
 # The site's own frontend reads search results from the Next.js SSR data route,
 # which is open and unauthenticated:
-#   GET /_next/data/<buildId>/index.json?searchState=<json>&page=<n>
-# The buildId rotates on each deploy, so we scrape it from the homepage per run.
+#   GET /_next/data/<buildId>/classic.json?searchState=<json>&page=<n>
+# (index.json now just 307-redirects there.) The buildId rotates on each deploy,
+# so we scrape it from the homepage per run.
+_SEARCH_PAGE = "classic"
 _BUILD_ID_RE = re.compile(r"/_next/static/([^/\"]+)/_buildManifest\.js")
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -83,6 +85,10 @@ def _get_build_id(session: requests.Session) -> str:
     if not match:
         raise ValueError("could not locate buildId in hiring.cafe homepage")
     return match.group(1)
+
+
+def _data_url(build_id: str) -> str:
+    return f"{_BASE}/_next/data/{build_id}/{_SEARCH_PAGE}.json"
 
 
 def _resolve_location(session: requests.Session, location_text: str | None) -> dict | None:
@@ -263,7 +269,7 @@ def run_scrape() -> tuple[list[Job], list[str]]:
     except Exception as e:
         return [], [f"hiring.cafe: failed to build search state: {e}"]
 
-    data_url = f"{_BASE}/_next/data/{build_id}/index.json"
+    data_url = _data_url(build_id)
 
     hits: list[dict] = []
     page = 0
@@ -282,7 +288,8 @@ def run_scrape() -> tuple[list[Job], list[str]]:
             break
         hits.extend(page_hits)
 
-        if page_props.get("ssrIsLastPage") or len(page_hits) < _PAGE_SIZE:
+        page_size = page_props.get("ssrPageSize") or _PAGE_SIZE
+        if page_props.get("ssrIsLastPage") or len(page_hits) < page_size:
             break
         page += 1
         time.sleep(random.uniform(0.5, 1.5))
