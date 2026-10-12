@@ -6,14 +6,17 @@ import re
 import time
 
 # Third-party
-import requests
+from curl_cffi import requests
 
 # Local
 from config import Config as config
 from job_model import Job
 
 
-_BASE = "https://hiring.cafe"
+# hiring.cafe now redirects here; the new domain sits behind a Cloudflare bot
+# check that 403s plain `requests`, so we use curl_cffi to impersonate Chrome's
+# TLS fingerprint.
+_BASE = "https://hiringcafe.com"
 _HOME_URL = f"{_BASE}/"
 _SEARCH_LOCATION_URL = f"{_BASE}/api/searchLocation"
 _JOB_DESCRIPTION_URL = f"{_BASE}/api/job-description"
@@ -25,11 +28,6 @@ _JOB_DESCRIPTION_URL = f"{_BASE}/api/job-description"
 # The buildId rotates on each deploy, so we scrape it from the homepage per run.
 _BUILD_ID_RE = re.compile(r"/_next/static/([^/\"]+)/_buildManifest\.js")
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
-
-_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
 
 _PAGE_SIZE = 40             # hiring.cafe returns 40 hits/page (pageProps.ssrPageSize)
 _MAX_PAGES = 25            # safety cap on pagination
@@ -60,13 +58,10 @@ _SENIORITY_LEVEL_MAP = {
 
 
 def _session() -> requests.Session:
-    s = requests.Session()
-    s.headers.update(
-        {
-            "User-Agent": _USER_AGENT,
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-    )
+    # No User-Agent override: impersonate sets one that matches the TLS
+    # fingerprint, and a mismatch is what the bot check looks for.
+    s = requests.Session(impersonate="chrome")
+    s.headers.update({"Accept-Language": "en-US,en;q=0.9"})
     return s
 
 

@@ -4,7 +4,7 @@ Automatically scrapes job postings, filters them against your resume using Gemin
 
 ## How It Works
 
-1. **Scrapes** job listings from your chosen source — LinkedIn (cookie-based auth via the `linkedin-api` library) or [hiring.cafe](https://hiring.cafe) (no authentication required). Select one with the `SCRAPER` config variable.
+1. **Scrapes** job listings from your chosen source — LinkedIn (cookie-based auth via the `linkedin-api` library) or [hiring.cafe](https://hiringcafe.com) (no authentication required). Select one with the `SCRAPER` config variable.
 2. **Parses** your resume PDF using Gemini to extract structured data (cached as `resume.json`)
 3. **Qualifies** each job by scoring resume-to-job fit with Gemini AI — only jobs scoring ≥ 80/100 pass. The score goes in the Score column and Gemini's reasoning and matching strengths go in Notes.
 4. **Writes** new qualifying jobs to your Google Sheet, skipping duplicates and blocked companies
