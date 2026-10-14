@@ -200,6 +200,8 @@ def _notify_tracks(added: list[Job], errors: list[str], overloaded_batches: int)
                      "fallback prompts are in the workflow run summary.")
     note = "\n".join(notes)
 
+    if not any(webhooks.values()):
+        print("[discord] no track webhooks set — skipping job notifications")
     for url in dict.fromkeys(u for u in webhooks.values() if u):
         tracks = {t for t, u in webhooks.items() if u == url}
         discord_notifier.notify_jobs(
