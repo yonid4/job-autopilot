@@ -3,8 +3,10 @@ import os
 from typing import Callable
 
 # Local
+import discord_notifier
 import hiringcafe_service
 import linkedin_service
+import prefilter
 import sheets
 from config import Config as config
 from job_model import Job
@@ -26,6 +28,7 @@ _SCRAPERS: dict[str, ScrapeFn] = {
 EnrichFn = Callable[[list[Job]], list[str]]
 _ENRICHERS: dict[str, EnrichFn] = {
     "hiringcafe": hiringcafe_service.enrich_descriptions,
+    "linkedin": linkedin_service.enrich_details,
 }
 
 
@@ -72,23 +75,23 @@ def _write_fallback_summary(prompts: list[str]) -> None:
         f.writelines(lines)
 
 
-def main() -> None:
-    if os.path.isfile(RESUME_JSON_PATH):
-        print("Loading cached resume...")
-        resume = load_resume()
-    else:
-        print("Resume not found. Processing resume.pdf...")
-        resume = process_resume(_RESUME_PDF_PATH)
-        print("Resume processed and saved.")
+def _drop_rejected(jobs: list[Job], reason_fn: Callable[[Job], str | None], stage: str) -> list[Job]:
+    """Jobs the prefilter keeps; each dropped job is logged with its reason."""
+    kept: list[Job] = []
+    for job in jobs:
+        reason = reason_fn(job)
+        if reason:
+            print(f"[prefilter] {stage}: dropping {job.company} — {job.role} ({reason})")
+        else:
+            kept.append(job)
+    return kept
 
-    scraper_name, scrape_fn = _select_scraper()
-    if scraper_name is None or scrape_fn is None:
-        print(f"Unknown SCRAPER {os.getenv('SCRAPER') or getattr(config, 'SCRAPER', None)!r}. "
-              f"Valid options: {', '.join(_SCRAPERS)}.")
-        return
 
-    print(f"Scraping with '{scraper_name}': {config.SEARCH_TERM} in {config.LOCATION}\n")
+def _scrape_and_add(scraper_name: str, scrape_fn: ScrapeFn, resume) -> tuple[list[Job], list[str], int]:
+    """Scrape, filter, qualify and write to the sheet.
 
+    Returns (jobs added to the sheet, scrape errors, Gemini batches that 503'd).
+    """
     jobs, errors = scrape_fn()
 
     for err in errors:
@@ -96,18 +99,26 @@ def main() -> None:
 
     if not jobs:
         print(f"No jobs returned from {scraper_name} service.")
-        return
+        return [], errors, 0
 
-    existing_links = sheets.get_existing_links()
+    # Dedup against every tracking tab, not just today's: the scraper writes a
+    # tab per run date, and the lookback window overlaps the previous day.
+    # get_existing_links() also creates today's tab when it's missing.
+    existing_links = sheets.get_existing_links() | {
+        row.link for row in sheets.get_application_rows() if row.link
+    }
     new_jobs = [j for j in jobs if j.link not in existing_links]
     duplicates = len(jobs) - len(new_jobs)
 
     blocked = {c.lower() for c in config.BLOCKED_COMPANIES}
     new_jobs = [j for j in new_jobs if (j.company or "").lower() not in blocked]
 
+    # Free title cull before the per-job detail fetch.
+    new_jobs = _drop_rejected(new_jobs, lambda j: prefilter.title_reject_reason(j.role), "title")
+
     if not new_jobs:
         print(f"No new jobs found ({duplicates} duplicates skipped).")
-        return
+        return [], errors, 0
 
     # Fetch heavy per-job data (e.g. full descriptions) only for the jobs that
     # survived dedup/block filtering, before they go to Gemini qualification.
@@ -115,6 +126,18 @@ def main() -> None:
     if enrich_fn:
         for err in enrich_fn(new_jobs):
             print(f"[error] {err}")
+
+    # Free description rules (years, graduation window, clearance) before the
+    # paid Gemini call. The title is included so "New Grad (2026)" counts.
+    new_jobs = _drop_rejected(
+        new_jobs,
+        lambda j: prefilter.jd_reject_reason(f"{j.role}.\n{j.description or ''}"),
+        "description",
+    )
+
+    if not new_jobs:
+        print("No jobs left after the description rules.")
+        return [], errors, 0
 
     # Filter jobs using Gemini AI API using user's resume
     batch_size = 6
@@ -140,12 +163,13 @@ def main() -> None:
 
     if not qualified_jobs and not fallback_prompts:
         print("No jobs passed the qualification threshold.")
-        return
+        return [], errors, 0
 
+    added: list[Job] = []
     if qualified_jobs:
-        new_jobs = qualified_jobs[:config.RESULTS_WANTED]
-        sheets.append_jobs(new_jobs)
-        print(f"Done: {len(new_jobs)} new jobs added, {duplicates} duplicates skipped.")
+        added = qualified_jobs[:config.RESULTS_WANTED]
+        sheets.append_jobs(added)
+        print(f"Done: {len(added)} new jobs added, {duplicates} duplicates skipped.")
 
     # Sort the sheet by Score (column J) descending, Z-to-A. Runs after everything
     # that could be added was added — even if Gemini 503'd on some batches.
@@ -158,6 +182,58 @@ def main() -> None:
 
     if fallback_prompts:
         print(f"Gemini was overloaded for {len(fallback_prompts)} batch(es). Fallback prompts written to the workflow run summary.")
+
+    return added, errors, len(fallback_prompts)
+
+
+def _notify_tracks(added: list[Job], errors: list[str], overloaded_batches: int) -> None:
+    """Post one digest per track webhook — a heartbeat when it got no matches.
+
+    Tracks that share a webhook share one digest. The note carries anything
+    that makes a quiet run suspicious: scrape errors or Gemini overload."""
+    webhooks: dict[str, str] = getattr(config, "DISCORD_TRACK_WEBHOOKS", {})
+    notes = []
+    if errors:
+        notes.append(f"⚠️ {len(errors)} scrape error(s), first: {errors[0][:300]}")
+    if overloaded_batches:
+        notes.append(f"⚠️ Gemini was overloaded for {overloaded_batches} batch(es) — "
+                     "fallback prompts are in the workflow run summary.")
+    note = "\n".join(notes)
+
+    for url in dict.fromkeys(u for u in webhooks.values() if u):
+        tracks = {t for t, u in webhooks.items() if u == url}
+        discord_notifier.notify_jobs(
+            [j for j in added if j.track in tracks], webhook_url=url, note=note,
+        )
+
+
+def main() -> None:
+    if os.path.isfile(RESUME_JSON_PATH):
+        print("Loading cached resume...")
+        resume = load_resume()
+    else:
+        print("Resume not found. Processing resume.pdf...")
+        resume = process_resume(_RESUME_PDF_PATH)
+        print("Resume processed and saved.")
+
+    scraper_name, scrape_fn = _select_scraper()
+    if scraper_name is None or scrape_fn is None:
+        print(f"Unknown SCRAPER {os.getenv('SCRAPER') or getattr(config, 'SCRAPER', None)!r}. "
+              f"Valid options: {', '.join(_SCRAPERS)}.")
+        return
+
+    tracks = getattr(config, "LINKEDIN_COMPANY_TRACKS", None) if scraper_name == "linkedin" else None
+    if tracks:
+        print(f"Scraping with '{scraper_name}': {len(tracks)} company track(s) "
+              f"in {len(config.LINKEDIN_LOCATIONS)} location(s)\n")
+    else:
+        print(f"Scraping with '{scraper_name}': {config.SEARCH_TERM} in {config.LOCATION}\n")
+
+    added, errors, overloaded_batches = _scrape_and_add(scraper_name, scrape_fn, resume)
+
+    # Only the LinkedIn company tracks have Discord channels.
+    if tracks:
+        _notify_tracks(added, errors, overloaded_batches)
 
 
 if __name__ == "__main__":
