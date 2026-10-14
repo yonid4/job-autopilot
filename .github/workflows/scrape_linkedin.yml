@@ -1,0 +1,178 @@
+name: Scrape LinkedIn Companies
+
+on:
+  schedule:
+    # 12:20 and 17:20 Pacific while daylight saving is on (cron is UTC and
+    # doesn't follow DST). After DST ends on Nov 1 these fire at 11:20 and
+    # 16:20 PST; switch to "20 20 * * *" and "20 1 * * *" to keep the clock
+    # time. GitHub often starts scheduled runs a few minutes late.
+    - cron: "20 19 * * *"
+    - cron: "20 0 * * *"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Code branch to run"
+        required: false
+        default: "feat/linkedin-company-search"
+      hours_old:
+        description: "Only fetch jobs posted in the last N hours"
+        required: false
+        default: "28"
+      sheet_name:
+        description: "Sheet tab to write jobs into (created if missing; blank = today's Pacific date, e.g. 'Oct 14')"
+        required: false
+        default: ""
+
+# A late scheduled run must not overlap the next one: both would read the
+# sheet before either writes, and add the same jobs twice.
+concurrency:
+  group: scrape-linkedin
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Scheduled runs have no inputs, so every input needs a fallback here;
+          # without one, checkout resolves to main, which lacks the scraper code.
+          # TODO: change this fallback (and the input default above) to
+          # linkedin-hiringcafe once feat/linkedin-company-search is merged or deleted.
+          ref: ${{ inputs.branch || 'feat/linkedin-company-search' }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Keep the tracks, locations and prefilter lists below in sync with
+      # config.example.py on the code branch — this step writes config.py from
+      # scratch, so nothing there reaches the scheduled runs on its own.
+      - name: Write config.py
+        env:
+          HOURS_OLD: ${{ inputs.hours_old || '28' }}
+          SHEET_NAME: ${{ inputs.sheet_name || '' }}
+        run: |
+          python - <<'EOF'
+          import os, textwrap
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          hours_old = int(os.environ.get("HOURS_OLD") or 28)
+          # Default the sheet tab to today's date in Pacific time, e.g. "Oct 14".
+          today_pst = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%b %-d")
+          sheet_name = os.environ.get("SHEET_NAME") or today_pst
+          snippet = textwrap.dedent("""
+              import os
+              from dotenv import load_dotenv
+              load_dotenv()
+              class Config:
+                  SCRAPER = "linkedin"
+                  SEARCH_TERM = "Software Engineer"
+                  LOCATION = "San Francisco Bay Area"
+                  RESULTS_WANTED = 150
+                  HOURS_OLD = __HOURS_OLD__
+                  DISTANCE = 25
+                  _blocked_extra = os.getenv("BLOCKED_COMPANIES")
+                  BLOCKED_COMPANIES: list[str] = ["Revature", "Epic"] + (
+                      [c.strip() for c in _blocked_extra.split(",") if c.strip()]
+                      if _blocked_extra else []
+                  )
+                  IS_REMOTE = False
+                  JOB_TYPE = "fulltime"
+                  # No LinkedIn experience filter: employers set it unreliably and
+                  # it left almost nothing. The prefilter and Gemini cull seniors.
+                  EXPERIENCE_LEVEL = None
+                  LINKEDIN_LI_AT = os.getenv("LINKEDIN_LI_AT")
+                  LINKEDIN_JSESSIONID = os.getenv("LINKEDIN_JSESSIONID")
+                  LINKEDIN_COMPANY_TRACKS: dict[str, dict] = {
+                      "A": {
+                          "companies": {"Bright Data": "4000016", "Deloitte": "1038", "Slalom": "166000"},
+                          "keywords": "solutions engineer OR forward deployed OR implementation engineer"
+                                      " OR integration engineer OR software engineer",
+                      },
+                      "B": {
+                          "companies": {
+                              "Franklin Templeton": "3676", "Oracle": "1028", "Intuit": "1666",
+                              "ServiceNow": "29352", "Bloomberg": "2494",
+                          },
+                          "keywords": "software engineer OR backend engineer OR full stack engineer"
+                                      " OR software developer",
+                      },
+                  }
+                  LINKEDIN_LOCATIONS: list[dict] = [
+                      {"name": "San Francisco Bay Area", "geo_id": "90000084", "remote": False},
+                      {"name": "New York City Metropolitan Area", "geo_id": "90000070", "remote": False},
+                      {"name": "Greater Seattle Area", "geo_id": "90000091", "remote": False},
+                      {"name": "San Diego Metropolitan Area", "geo_id": "90010472", "remote": False},
+                      {"name": "United States", "geo_id": "103644278", "remote": True},
+                  ]
+                  EXCLUDE_TITLE_TERMS: list[str] = [
+                      "senior", "sr.", "sr", "staff", "principal", "distinguished", "fellow",
+                      "lead", "manager", "mgr", "director", "vp", "vice president",
+                      "head of", "chief", "architect",
+                      "intern", "internship", "co-op", "apprentice",
+                  ]
+                  IC_TITLE_PHRASES: list[str] = ["member of technical staff"]
+                  MAX_REQUIRED_YEARS = 3
+                  PREFERRED_MARKERS: list[str] = [
+                      "preferred", "nice to have", "nice-to-have", "bonus", "a plus", "ideally",
+                      "desired", "desirable",
+                  ]
+                  GRAD_YEAR_CUTOFF = 2026
+                  CLEARANCE_TERMS: list[str] = [
+                      "security clearance", "secret clearance", "top secret", "ts/sci", "ts-sci",
+                      "active clearance", "clearance required", "clearance is required",
+                      "polygraph", "public trust clearance", "dod clearance",
+                  ]
+                  CLEARANCE_NEGATIONS: list[str] = [
+                      "no clearance required", "no security clearance required",
+                      "clearance is not required", "clearance not required",
+                      "does not require a security clearance", "does not require a clearance",
+                      "does not require clearance",
+                  ]
+                  SHEET_TAB_NAME = "__SHEET_NAME__"
+                  STATUS_ON_SCRAPE = "Have Not Applied"
+                  GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+                  _gemini_keys_raw = os.getenv("GEMINI_API_KEYS")
+                  GEMINI_API_KEYS: list[str] = (
+                      [k.strip() for k in _gemini_keys_raw.split(",") if k.strip()]
+                      if _gemini_keys_raw
+                      else ([GEMINI_API_KEY] if GEMINI_API_KEY else [])
+                  )
+                  GEMINI_PRIMARY_MODEL = os.getenv("GEMINI_PRIMARY_MODEL", "gemini-2.5-flash")
+                  DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+                  DISCORD_TRACK_WEBHOOKS: dict[str, str] = {
+                      "A": os.getenv("DISCORD_WEBHOOK_URL_STARTUP", ""),
+                      "B": os.getenv("DISCORD_WEBHOOK_URL_STARTUP", ""),
+                  }
+          """).strip()
+          snippet = snippet.replace("__HOURS_OLD__", str(hours_old)).replace("__SHEET_NAME__", sheet_name)
+          with open("config.py", "w") as f:
+              f.write(snippet + "\n")
+          EOF
+
+      - name: Write credentials and resume
+        env:
+          GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
+          RESUME_JSON: ${{ secrets.RESUME_JSON }}
+        run: |
+          echo "$GOOGLE_SHEETS_CREDS" > credentials.json
+          echo "$RESUME_JSON" > resume.json
+
+      - name: Run scraper
+        env:
+          SCRAPER: linkedin
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          GOOGLE_SHEET_ID: ${{ secrets.SPREAD_SHEET_ID }}
+          GOOGLE_CREDENTIALS_PATH: credentials.json
+          LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
+          LINKEDIN_JSESSIONID: ${{ secrets.LINKEDIN_JSESSIONID }}
+          BLOCKED_COMPANIES: ${{ secrets.BLOCKED_COMPANIES }}
+          DISCORD_WEBHOOK_URL_STARTUP: ${{ secrets.DISCORD_WEBHOOK_URL_STARTUP }}
+          DISCORD_MENTION: ${{ vars.DISCORD_MENTION }}
+        run: python main.py
