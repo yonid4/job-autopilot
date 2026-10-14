@@ -1,6 +1,8 @@
 # Standard library
 import random
+import re
 import time
+from urllib.parse import urlencode
 
 # Third-party
 from linkedin_api import Linkedin
@@ -26,6 +28,19 @@ _JOB_TYPE_MAP = {
     "contract": "C",
     "internship": "I",
 }
+
+# Company-track searches call LinkedIn's job-cards endpoint directly instead of
+# Linkedin.search_jobs: search_jobs only sends a location *name*, which LinkedIn
+# treats as a fallback and ignores (every metro returned the same jobs), and it
+# discards the search cards that carry the company name and location.
+_JOB_CARDS_PATH = "/voyagerJobsDashJobCards"
+_JOB_CARDS_DECORATION = "com.linkedin.voyager.dash.deco.jobs.search.JobSearchCardsCollection-174"
+_JOB_CARD_TYPE = "com.linkedin.voyager.dash.jobs.JobPostingCard"
+_SEARCH_PAGE_SIZE = 25
+_REMOTE_WORKPLACE = "2"
+# These characters are the query's own syntax; inside the keywords they change
+# its structure and LinkedIn silently returns nothing.
+_QUERY_SYNTAX_RE = re.compile(r"[(),:]")
 
 
 def _build_client() -> Linkedin:
@@ -100,6 +115,141 @@ def _result_to_job(api: Linkedin, result: dict) -> Job:
     )
 
 
+# --- Company-track searches ---------------------------------------------------
+
+def _selected_filters(company_ids: list[str], location: dict) -> str:
+    filters = [f"company:List({','.join(company_ids)})"]
+    if location.get("remote"):
+        filters.append(f"workplaceType:List({_REMOTE_WORKPLACE})")
+    elif config.DISTANCE:
+        filters.append(f"distance:List({config.DISTANCE})")
+    if config.EXPERIENCE_LEVEL and config.EXPERIENCE_LEVEL.lower() in _EXPERIENCE_LEVEL_MAP:
+        filters.append(f"experience:List({_EXPERIENCE_LEVEL_MAP[config.EXPERIENCE_LEVEL.lower()]})")
+    if config.JOB_TYPE and config.JOB_TYPE.lower() in _JOB_TYPE_MAP:
+        filters.append(f"jobType:List({_JOB_TYPE_MAP[config.JOB_TYPE.lower()]})")
+    if config.HOURS_OLD is not None:
+        filters.append(f"timePostedRange:List(r{config.HOURS_OLD * 3600})")
+    return ",".join(filters)
+
+
+def _track_query(keywords: str, company_ids: list[str], location: dict) -> str:
+    keywords = " ".join(_QUERY_SYNTAX_RE.sub(" ", keywords).split())
+    return (
+        "(origin:JOB_SEARCH_PAGE_QUERY_EXPANSION,"
+        f"keywords:{keywords},"
+        f"locationUnion:(geoId:{location['geo_id']}),"
+        f"selectedFilters:({_selected_filters(company_ids, location)}),"
+        "spellCorrectionEnabled:true)"
+    )
+
+
+def _search_cards(api: Linkedin, query: str) -> list[dict]:
+    """Every search card for `query`, paged up to config.RESULTS_WANTED."""
+    cards: list[dict] = []
+    start = 0
+    while len(cards) < config.RESULTS_WANTED:
+        params = {
+            "decorationId": _JOB_CARDS_DECORATION,
+            "count": _SEARCH_PAGE_SIZE,
+            "q": "jobSearch",
+            "query": query,
+            "start": start,
+        }
+        res = api._fetch(
+            f"{_JOB_CARDS_PATH}?{urlencode(params, safe='(),:')}",
+            headers={"accept": "application/vnd.linkedin.normalized+json+2.1"},
+        )
+        res.raise_for_status()
+        data = res.json()
+        # Each posting comes back as a JOBS_SEARCH card (title, company,
+        # location) and an empty JOB_DETAILS card; only the first is useful.
+        page = [
+            item for item in data.get("included", [])
+            if item.get("$type") == _JOB_CARD_TYPE and "JOBS_SEARCH" in item.get("entityUrn", "")
+        ]
+        if not page:
+            break
+        cards.extend(page)
+        start += _SEARCH_PAGE_SIZE
+        total = data.get("data", {}).get("paging", {}).get("total", 0)
+        if start >= total:
+            break
+        time.sleep(random.uniform(1, 3))
+    return cards[: config.RESULTS_WANTED]
+
+
+def _text(card: dict, key: str) -> str:
+    return ((card.get(key) or {}).get("text") or "").strip()
+
+
+def _card_to_job(card: dict, track: str) -> Job | None:
+    job_id = (card.get("jobPostingUrn") or "").split(":")[-1]
+    if not job_id:
+        return None
+    return Job(
+        company=_text(card, "primaryDescription") or "Unknown",
+        role=_text(card, "title") or "Unknown",
+        link=f"https://www.linkedin.com/jobs/view/{job_id}",
+        track=track,
+    )
+
+
+def _run_track_searches(api: Linkedin) -> tuple[list[Job], list[str]]:
+    """One search per track per location. Descriptions are left empty here and
+    fetched later by enrich_details, only for jobs that survive dedup."""
+    errors: list[str] = []
+    jobs_by_link: dict[str, Job] = {}
+    for track, spec in config.LINKEDIN_COMPANY_TRACKS.items():
+        company_ids = list(spec["companies"].values())
+        for location in config.LINKEDIN_LOCATIONS:
+            label = f"track {track} / {location['name']}"
+            try:
+                cards = _search_cards(api, _track_query(spec["keywords"], company_ids, location))
+            except Exception as e:
+                errors.append(f"LinkedIn search failed for {label} (session may be expired): {e}")
+                continue
+            new = 0
+            for card in cards:
+                job = _card_to_job(card, track)
+                # Remote postings also show up in every metro search.
+                if job and job.link and job.link not in jobs_by_link:
+                    jobs_by_link[job.link] = job
+                    new += 1
+            print(f"[linkedin] {label}: {len(cards)} result(s), {new} new")
+            time.sleep(random.uniform(2, 4))
+    return list(jobs_by_link.values()), errors
+
+
+def enrich_details(jobs: list[Job]) -> list[str]:
+    """Fetch and attach full descriptions to the given jobs, in place.
+
+    Call this AFTER dedup/block filtering so a detail request is only made for
+    jobs that are actually kept. Jobs that already have a description (the
+    single-search fallback fetches inline) are skipped."""
+    errors: list[str] = []
+    targets = [j for j in jobs if j.description is None and j.link]
+    if not targets:
+        return errors
+
+    try:
+        api = _build_client()
+    except ValueError as e:
+        return [str(e)]
+
+    print(f"[linkedin] fetching details for {len(targets)} job(s)...")
+    for job in targets:
+        job_id = (job.link or "").rstrip("/").split("/")[-1]
+        details = _fetch_job_details(api, job_id)
+        if not details:
+            errors.append(f"LinkedIn: detail fetch failed for {job.link}")
+            continue
+        description = _parse_description(details)
+        job.description = description[:10000] if description else None
+        if job.company in (None, "", "Unknown"):
+            job.company = _parse_company(details)
+    return errors
+
+
 def run_scrape() -> tuple[list[Job], list[str]]:
     errors: list[str] = []
 
@@ -107,6 +257,11 @@ def run_scrape() -> tuple[list[Job], list[str]]:
         api = _build_client()
     except ValueError as e:
         return [], [str(e)]
+
+    if getattr(config, "LINKEDIN_COMPANY_TRACKS", None):
+        jobs, errors = _run_track_searches(api)
+        print(f"Found {len(jobs)} unique jobs across {len(config.LINKEDIN_COMPANY_TRACKS)} track(s)\n")
+        return jobs, errors
 
     try:
         results = api.search_jobs(**_build_search_kwargs())

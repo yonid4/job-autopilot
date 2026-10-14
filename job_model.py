@@ -22,6 +22,9 @@ class Job(BaseModel):
     # Source-specific id (e.g. hiring.cafe objectID) used to lazily fetch the
     # full description after filtering. Not written to the sheet.
     source_id: Optional[str] = None
+    # LinkedIn company track ("A"/"B") the job was found under; picks the
+    # Discord channel its notification goes to. Not written to the sheet.
+    track: Optional[str] = None
 
 
 class ApplicationRow(BaseModel):
