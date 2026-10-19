@@ -20,11 +20,12 @@ def make_job(n: int) -> Job:
     return Job(company="Oracle", role=f"Software Engineer {n}", link=f"https://www.linkedin.com/jobs/view/{n}")
 
 
-def make_result(job_number: int, score: int, reasoning: str = "Needs  5 years\nof Go.") -> QualifierData:
+def make_result(job_number: int, score: int, gap: str = "Needs  5 years\nof Go.") -> QualifierData:
     return QualifierData(
         qualification_score=score,
-        ai_reasoning=reasoning,
+        ai_reasoning="Strong Python skills. However, the role needs Go.",
         matching_strengths=["Python"],
+        main_gap=gap,
         job_number=job_number,
     )
 
@@ -64,17 +65,27 @@ def test_rejected_jobs_are_logged_with_score_and_reason(
 
     out = capsys.readouterr().out
     assert [j.role for j in qualified] == ["Software Engineer 2"]
-    assert "[gemini] rejected (score 62): Oracle — Software Engineer 1 — Needs 5 years of Go." in out
+    assert "[gemini] rejected (score 62): Oracle — Software Engineer 1 — gap: Needs 5 years of Go." in out
     assert "Software Engineer 2" not in out
 
 
-def test_long_reasoning_is_truncated(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    stub_gemini(monkeypatch, [make_result(1, 40, reasoning="x" * 1000)])
+def test_long_gap_is_truncated(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    stub_gemini(monkeypatch, [make_result(1, 40, gap="x" * 1000)])
 
     qualifiar.filtered_jobs([make_job(1)], resume=None)
 
     line = capsys.readouterr().out.strip()
     assert line.endswith("…") and len(line) < 400
+
+
+def test_reasoning_is_logged_when_gap_is_empty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stub_gemini(monkeypatch, [make_result(1, 50, gap="")])
+
+    qualifiar.filtered_jobs([make_job(1)], resume=None)
+
+    assert "gap: Strong Python skills. However, the role needs Go." in capsys.readouterr().out
 
 
 def test_bad_numbers_are_ignored_and_the_job_is_resent(

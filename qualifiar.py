@@ -30,6 +30,7 @@ class QualifierData(BaseModel):
     qualification_score: int = Field(description="Overall qualification score (0-100)")
     ai_reasoning: str = Field(description="Detailed explanation of the score")
     matching_strengths: list[str] = Field(description="Key strengths that match the job")
+    main_gap: str = Field(description="One sentence: the biggest reason the score is not higher")
     job_number: int = Field(description="The number N from the job's 'JOB N' label")
 
 
@@ -91,7 +92,7 @@ SCORING GUIDELINES:
 - 40-54: Poor match — major qualification gaps
 - 1-39: Very poor match — fundamental misalignment
 
-For each job, provide a qualification score, reasoning, and matching strengths.
+For each job, provide a qualification score, reasoning, matching strengths, and the main gap.
 """.strip()
 
 
@@ -105,6 +106,7 @@ Reply with a valid JSON array only — no markdown fences, no extra text. Each e
 - "qualification_score": integer 0-100
 - "ai_reasoning": string explaining the score
 - "matching_strengths": array of strings (key strengths that match the job)
+- "main_gap": one sentence, the biggest reason the score is not higher
 - "job_number": integer N from the job's "JOB N" label above
 
 Jobs with qualification_score >= 80 are considered a good match."""
@@ -193,8 +195,10 @@ def filtered_jobs(jobs: list[Job], resume: ResumeData) -> list[Job]:
     for job, result in _score_jobs(jobs, resume):
         score = result.qualification_score
         if score < THRESHOLD:
+            # The reasoning leads with strengths, so a cut-down copy hid the
+            # gap; the dedicated field says why in one line.
             print(f"[gemini] rejected (score {score}): {job.company} — {job.role} — "
-                  f"{_one_line(result.ai_reasoning)}")
+                  f"gap: {_one_line(result.main_gap or result.ai_reasoning)}")
             continue
         job.score = result.qualification_score
         notes = result.ai_reasoning
