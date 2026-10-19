@@ -143,9 +143,15 @@ def _track_query(keywords: str, company_ids: list[str], location: dict) -> str:
     )
 
 
-def _search_cards(api: Linkedin, query: str) -> list[dict]:
-    """Every search card for `query`, paged up to config.RESULTS_WANTED."""
+def _search_cards(api: Linkedin, query: str) -> tuple[list[dict], int, list[str]]:
+    """Every search card for `query`, paged up to config.RESULTS_WANTED.
+
+    Also returns the total LinkedIn reports for the search and the IDs of
+    postings the response mentioned but that never became a kept card, so a
+    gap between what LinkedIn found and what we kept shows in the log."""
     cards: list[dict] = []
+    reported = 0
+    seen_ids: set[str] = set()
     start = 0
     while len(cards) < config.RESULTS_WANTED:
         params = {
@@ -161,21 +167,41 @@ def _search_cards(api: Linkedin, query: str) -> list[dict]:
         )
         res.raise_for_status()
         data = res.json()
+        included = data.get("included", [])
+        seen_ids |= _posting_ids(included)
         # Each posting comes back as a JOBS_SEARCH card (title, company,
         # location) and an empty JOB_DETAILS card; only the first is useful.
         page = [
-            item for item in data.get("included", [])
+            item for item in included
             if item.get("$type") == _JOB_CARD_TYPE and "JOBS_SEARCH" in item.get("entityUrn", "")
         ]
+        total = data.get("data", {}).get("paging", {}).get("total", 0)
+        reported = reported or total
         if not page:
             break
         cards.extend(page)
         start += _SEARCH_PAGE_SIZE
-        total = data.get("data", {}).get("paging", {}).get("total", 0)
         if start >= total:
             break
         time.sleep(random.uniform(1, 3))
-    return cards[: config.RESULTS_WANTED]
+    cards = cards[: config.RESULTS_WANTED]
+    kept_ids = {(card.get("jobPostingUrn") or "").split(":")[-1] for card in cards}
+    return cards, reported, sorted(seen_ids - kept_ids)
+
+
+_POSTING_URN_RE = re.compile(r"urn:li:fsd_jobPosting:(\d+)")
+
+
+def _posting_ids(items: list[dict]) -> set[str]:
+    """Every job posting ID referenced anywhere in a response's included items,
+    whatever the item's type, to catch postings the card filter leaves out."""
+    ids: set[str] = set()
+    for item in items:
+        for key in ("entityUrn", "jobPostingUrn", "*jobPosting"):
+            match = _POSTING_URN_RE.search(str(item.get(key) or ""))
+            if match:
+                ids.add(match.group(1))
+    return ids
 
 
 def _text(card: dict, key: str) -> str:
@@ -225,7 +251,9 @@ def _run_track_searches(api: Linkedin) -> tuple[list[Job], list[str]]:
         for location in config.LINKEDIN_LOCATIONS:
             label = f"track {track} / {location['name']}"
             try:
-                cards = _search_cards(api, _track_query(spec["keywords"], company_ids, location))
+                cards, reported, skipped = _search_cards(
+                    api, _track_query(spec["keywords"], company_ids, location)
+                )
             except Exception as e:
                 errors.append(f"LinkedIn search failed for {label} (session may be expired): {e}")
                 continue
@@ -243,7 +271,11 @@ def _run_track_searches(api: Linkedin) -> tuple[list[Job], list[str]]:
                     track_jobs.append(job)
                     new += 1
             counts = _company_counts([j.company for j in location_jobs], configured)
-            print(f"[linkedin] {label}: {len(cards)} result(s), {new} new ({_format_counts(counts)})")
+            print(f"[linkedin] {label}: {len(cards)} result(s) (LinkedIn reports {reported}), "
+                  f"{new} new ({_format_counts(counts)})")
+            if skipped:
+                print(f"[linkedin] {label}: {len(skipped)} posting(s) in the response but not kept: "
+                      f"{', '.join(skipped)}")
             time.sleep(random.uniform(2, 4))
         if not searched:
             continue
