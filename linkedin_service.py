@@ -194,6 +194,22 @@ def _card_to_job(card: dict, track: str) -> Job | None:
     )
 
 
+def _company_counts(companies: list[str], configured: list[str]) -> dict[str, int]:
+    """Results per company: every configured company (zeros included, in config
+    order), then any name LinkedIn returned that matches none of them, which
+    usually means the company page is named differently from the config key."""
+    by_key = {name.casefold(): name for name in configured}
+    counts = {name: 0 for name in configured}
+    for company in companies:
+        name = by_key.get(company.casefold(), company)
+        counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def _format_counts(counts: dict[str, int]) -> str:
+    return ", ".join(f"{name} {n}" for name, n in counts.items())
+
+
 def _run_track_searches(api: Linkedin) -> tuple[list[Job], list[str]]:
     """One search per track per location. Descriptions are left empty here and
     fetched later by enrich_details, only for jobs that survive dedup."""
@@ -201,6 +217,11 @@ def _run_track_searches(api: Linkedin) -> tuple[list[Job], list[str]]:
     jobs_by_link: dict[str, Job] = {}
     for track, spec in config.LINKEDIN_COMPANY_TRACKS.items():
         company_ids = list(spec["companies"].values())
+        configured = list(spec["companies"].keys())
+        # Each track is one combined search, so without a per-company tally a
+        # company whose ID returns nothing is indistinguishable from a quiet day.
+        track_jobs: list[Job] = []
+        searched = False
         for location in config.LINKEDIN_LOCATIONS:
             label = f"track {track} / {location['name']}"
             try:
@@ -208,15 +229,29 @@ def _run_track_searches(api: Linkedin) -> tuple[list[Job], list[str]]:
             except Exception as e:
                 errors.append(f"LinkedIn search failed for {label} (session may be expired): {e}")
                 continue
+            searched = True
             new = 0
+            location_jobs: list[Job] = []
             for card in cards:
                 job = _card_to_job(card, track)
+                if not job:
+                    continue
+                location_jobs.append(job)
                 # Remote postings also show up in every metro search.
-                if job and job.link and job.link not in jobs_by_link:
+                if job.link and job.link not in jobs_by_link:
                     jobs_by_link[job.link] = job
+                    track_jobs.append(job)
                     new += 1
-            print(f"[linkedin] {label}: {len(cards)} result(s), {new} new")
+            counts = _company_counts([j.company for j in location_jobs], configured)
+            print(f"[linkedin] {label}: {len(cards)} result(s), {new} new ({_format_counts(counts)})")
             time.sleep(random.uniform(2, 4))
+        if not searched:
+            continue
+        totals = _company_counts([j.company for j in track_jobs], configured)
+        print(f"[linkedin] track {track} unique jobs per company: {_format_counts(totals)}")
+        missing = [name for name in configured if totals[name] == 0]
+        if missing:
+            print(f"[linkedin] track {track}: no results in any location for {', '.join(missing)}")
     return list(jobs_by_link.values()), errors
 
 
