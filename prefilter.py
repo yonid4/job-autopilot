@@ -9,8 +9,11 @@ Ported from faang_scraper's jobtracker/prefilter.py. Two stages:
   fetched. It drops roles that require 3+ years, restrict graduation to 2026 or
   later, or require a security clearance.
 
+`merge_same_postings(jobs)` then folds a job posted once per city into one, so
+Gemini scores it once.
+
 Each rule only fires on an unambiguous signal; anything borderline is left for
-Gemini to weigh. Pure module: imports only `config` and stdlib `re`.
+Gemini to weigh. Pure module: imports only `config`, `job_model` and stdlib `re`.
 """
 
 # Standard library
@@ -18,6 +21,7 @@ import re
 
 # Local
 from config import Config as config
+from job_model import Job
 
 
 def _token_patterns(terms: list[str]) -> tuple[re.Pattern[str], ...]:
@@ -137,3 +141,38 @@ def jd_reject_reason(jd: str | None) -> str | None:
     if requires_clearance(jd):
         return "security clearance required"
     return None
+
+
+# ── Duplicate postings (after the JD rules, before Gemini) ──────────────────
+
+def merge_same_postings(jobs: list[Job]) -> list[Job]:
+    """One job per company, title and description; the first link is kept.
+
+    Some companies (Deloitte) post one listing per city with its own link, so
+    the same job reached Gemini several times and, had it passed, would have
+    been written once per city. A job without a description is never merged:
+    with nothing to compare, two same-titled reqs may be different jobs."""
+    kept: dict[tuple[str, str, str], Job] = {}
+    merged: dict[tuple[str, str, str], list[str]] = {}
+    result: list[Job] = []
+    for job in jobs:
+        if not job.description:
+            result.append(job)
+            continue
+        key = (
+            (job.company or "").strip().casefold(),
+            (job.role or "").strip().casefold(),
+            " ".join(job.description.split()),
+        )
+        if key in kept:
+            merged[key].append(job.link or "")
+            continue
+        kept[key] = job
+        merged[key] = []
+        result.append(job)
+    for key, links in merged.items():
+        if links:
+            job = kept[key]
+            print(f"[dedup] {job.company} — {job.role}: {len(links) + 1} postings with the same "
+                  f"description, scoring {job.link} only (also {', '.join(links)})")
+    return result

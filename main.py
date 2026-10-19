@@ -139,6 +139,8 @@ def _scrape_and_add(scraper_name: str, scrape_fn: ScrapeFn, resume) -> tuple[lis
         print("No jobs left after the description rules.")
         return [], errors, 0
 
+    new_jobs = prefilter.merge_same_postings(new_jobs)
+
     # Filter jobs using Gemini AI API using user's resume
     batch_size = 6
     qualified_jobs = []
