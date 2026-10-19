@@ -30,7 +30,7 @@ class QualifierData(BaseModel):
     qualification_score: int = Field(description="Overall qualification score (0-100)")
     ai_reasoning: str = Field(description="Detailed explanation of the score")
     matching_strengths: list[str] = Field(description="Key strengths that match the job")
-    job_link: str = Field(description="Copy the job URL exactly as provided in the job details")
+    job_number: int = Field(description="The number N from the job's 'JOB N' label")
 
 
 def _create_analysis_prompt(jobs: list[Job], resume: ResumeData) -> str:
@@ -63,7 +63,7 @@ def _create_analysis_prompt(jobs: list[Job], resume: ResumeData) -> str:
 
     return f"""
 You are an expert job qualification analyst. Evaluate how well the candidate's resume matches each job listed below.
-Return one result per job, in the same order as the jobs are listed.
+Return one result per job, in the same order as the jobs are listed, each with the job's number from its "JOB N" label.
 
 {job_sections}
 
@@ -105,7 +105,7 @@ Reply with a valid JSON array only — no markdown fences, no extra text. Each e
 - "qualification_score": integer 0-100
 - "ai_reasoning": string explaining the score
 - "matching_strengths": array of strings (key strengths that match the job)
-- "job_link": the exact URL from the job details above (copy it character-for-character)
+- "job_number": integer N from the job's "JOB N" label above
 
 Jobs with qualification_score >= 80 are considered a good match."""
 
@@ -147,21 +147,51 @@ def _one_line(text: str, limit: int = 300) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def filtered_jobs(jobs: list[Job], resume: ResumeData) -> list[Job]:
-    analyzed_jobs = call_gemini(jobs, resume)
+def _match_results(jobs: list[Job], results: list[QualifierData]) -> list[tuple[Job, QualifierData]]:
+    """Pair each result with its job by the "JOB N" number. Numbers out of
+    range or already used are logged and ignored rather than guessed at."""
+    matched: dict[int, QualifierData] = {}
+    for result in results:
+        n = result.job_number
+        if not 1 <= n <= len(jobs):
+            print(f"[gemini] score {result.qualification_score} for job number {n} "
+                  f"(sent {len(jobs)}), ignored")
+        elif n in matched:
+            print(f"[gemini] second score {result.qualification_score} for JOB {n} "
+                  f"({jobs[n - 1].company} — {jobs[n - 1].role}), ignored")
+        else:
+            matched[n] = result
+    return [(jobs[n - 1], result) for n, result in sorted(matched.items())]
 
-    link_to_job = {job.link: job for job in jobs}
-    answered: set[str] = set()
+
+def _score_jobs(jobs: list[Job], resume: ResumeData) -> list[tuple[Job, QualifierData]]:
+    """Score every job, re-sending once any job that got no usable result.
+
+    The re-send is best effort: if it fails (a 503, or every key out of
+    quota), the first pass's scores are kept and the jobs it was for are
+    logged as unscored instead of failing the whole batch."""
+    scored = _match_results(jobs, call_gemini(jobs, resume) or [])
+    answered = {id(job) for job, _ in scored}
+    missing = [job for job in jobs if id(job) not in answered]
+    if missing:
+        print(f"[gemini] no usable score for {len(missing)} job(s), re-sending them once...")
+        try:
+            scored += _match_results(missing, call_gemini(missing, resume) or [])
+        except GeminiOverloadError:
+            print("[gemini] 503 overload on the re-send")
+        except Exception as e:
+            print(f"[gemini] re-send failed: {e}")
+        answered = {id(job) for job, _ in scored}
+        for job in missing:
+            if id(job) not in answered:
+                print(f"[gemini] no score returned for {job.company} — {job.role} ({job.link})")
+    return scored
+
+
+def filtered_jobs(jobs: list[Job], resume: ResumeData) -> list[Job]:
     qualified: list[Job] = []
-    for result in analyzed_jobs:
+    for job, result in _score_jobs(jobs, resume):
         score = result.qualification_score
-        job = link_to_job.get(result.job_link)
-        if job is None:
-            # Results are matched back by link; a mangled link silently lost
-            # the job, even one that scored above the threshold.
-            print(f"[gemini] score {score} for unknown link {result.job_link!r}, dropped")
-            continue
-        answered.add(job.link)
         if score < THRESHOLD:
             print(f"[gemini] rejected (score {score}): {job.company} — {job.role} — "
                   f"{_one_line(result.ai_reasoning)}")
@@ -172,7 +202,4 @@ def filtered_jobs(jobs: list[Job], resume: ResumeData) -> list[Job]:
             notes += "\n\nStrengths: " + "; ".join(result.matching_strengths)
         job.notes = notes
         qualified.append(job)
-    for job in jobs:
-        if job.link not in answered:
-            print(f"[gemini] no score returned for {job.company} — {job.role} ({job.link})")
     return qualified
