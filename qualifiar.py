@@ -142,16 +142,29 @@ def call_gemini(jobs: list[Job], resume: ResumeData) -> list[QualifierData]:
     raise RuntimeError("All Gemini API keys exhausted their quota")
 
 
+def _one_line(text: str, limit: int = 300) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 def filtered_jobs(jobs: list[Job], resume: ResumeData) -> list[Job]:
     analyzed_jobs = call_gemini(jobs, resume)
 
     link_to_job = {job.link: job for job in jobs}
+    answered: set[str] = set()
     qualified: list[Job] = []
     for result in analyzed_jobs:
-        if result.qualification_score < THRESHOLD:
-            continue
+        score = result.qualification_score
         job = link_to_job.get(result.job_link)
         if job is None:
+            # Results are matched back by link; a mangled link silently lost
+            # the job, even one that scored above the threshold.
+            print(f"[gemini] score {score} for unknown link {result.job_link!r}, dropped")
+            continue
+        answered.add(job.link)
+        if score < THRESHOLD:
+            print(f"[gemini] rejected (score {score}): {job.company} — {job.role} — "
+                  f"{_one_line(result.ai_reasoning)}")
             continue
         job.score = result.qualification_score
         notes = result.ai_reasoning
@@ -159,4 +172,7 @@ def filtered_jobs(jobs: list[Job], resume: ResumeData) -> list[Job]:
             notes += "\n\nStrengths: " + "; ".join(result.matching_strengths)
         job.notes = notes
         qualified.append(job)
+    for job in jobs:
+        if job.link not in answered:
+            print(f"[gemini] no score returned for {job.company} — {job.role} ({job.link})")
     return qualified
